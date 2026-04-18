@@ -582,6 +582,7 @@ function swapXY(){
 }
 
 function clearData(){
+  if(!confirm('Opravdu smazat všechna data?')) return;
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
   for(let i=0;i<6;i++) addRow();
