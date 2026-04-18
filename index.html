@@ -88,13 +88,15 @@ thead th{
   font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
   padding:7px 8px;border-bottom:1px solid var(--border);text-align:center;
 }
-thead th:nth-child(1){width:46px;}
-thead th:nth-child(2),thead th:nth-child(3){width:calc((100% - 46px)/2);}
+thead th:nth-child(1){width:32px;}
+thead th:nth-child(2){width:46px;}
+thead th:nth-child(3),thead th:nth-child(4){width:calc((100% - 78px)/2);}
 tbody tr{border-bottom:1px solid var(--border);}
 tbody tr:last-child{border-bottom:none;}
 tbody tr:nth-child(even){background:var(--surface2);}
 tbody tr:hover{background:var(--btn-h);}
 td{padding:3px 5px;text-align:center;vertical-align:middle;}
+td.row-num{font-family:'Fira Code',monospace;font-size:11px;color:var(--text-muted);user-select:none;}
 td input[type="checkbox"]{
   width:16px;height:16px;accent-color:var(--accent);cursor:pointer;
 }
@@ -186,7 +188,7 @@ td input.cell:focus{
       <div class="sec-label">Zadejte data (x, y):</div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>✓</th><th>x</th><th>y</th></tr></thead>
+          <thead><tr><th>#</th><th>✓</th><th>x</th><th>y</th></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
@@ -364,6 +366,7 @@ function addRow(){
   const row=tb.rows.length;
   const tr=document.createElement('tr');
   tr.innerHTML=`
+    <td class="row-num">${row+1}</td>
     <td><input type="checkbox" checked onchange="autoRecompute()"></td>
     <td><input class="cell" type="text" placeholder="" data-r="${row}" data-c="x"
                onkeydown="handleKey(event,${row},'x')" oninput="autoRecompute()"></td>
@@ -398,9 +401,9 @@ function getTableData(){
   const x=[],y=[],excl=[];
   for(let i=0;i<tb.rows.length;i++){
     const row=tb.rows[i];
-    const cb=row.cells[0].querySelector('input[type="checkbox"]');
-    const xv=row.cells[1].querySelector('input').value.trim().replace(',','.');
-    const yv=row.cells[2].querySelector('input').value.trim().replace(',','.');
+    const cb=row.cells[1].querySelector('input[type="checkbox"]');
+    const xv=row.cells[2].querySelector('input').value.trim().replace(',','.');
+    const yv=row.cells[3].querySelector('input').value.trim().replace(',','.');
     if(!xv||!yv) continue;
     const xf=parseFloat(xv), yf=parseFloat(yv);
     if(isNaN(xf)||isNaN(yf)) continue;
