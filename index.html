@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="cs" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Regrese – Analýza dat</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+
+:root{
+  --bg:#18181c;--surface:#22222a;--surface2:#2a2a33;
+  --border:#383844;--text:#e8e8f0;--text-muted:#7070880;
+  --accent:#4a9eff;--danger:#ff6060;--danger-h:#ff7c7c;
+  --success:#4cde8c;--btn:#2a2a33;--btn-h:#34343e;
+  --chart:#1c1c24;--shadow:0 4px 20px rgba(0,0,0,.5);
+  --muted:#7070880; /* fix typo below */
+}
+[data-theme="dark"]{
+  --text-muted:#70708a;
+}
+[data-theme="light"]{
+  --bg:#f0f0f5;--surface:#ffffff;--surface2:#f5f5fa;
+  --border:#dcdce8;--text:#18181c;--text-muted:#666675;
+  --accent:#2060c0;--danger:#c83030;--danger-h:#b82020;
+  --success:#1a8840;--btn:#ffffff;--btn-h:#ebebf2;
+  --chart:#fafafa;--shadow:0 4px 20px rgba(0,0,0,.12);
+}
+
+body{
+  font-family:'Sora',sans-serif;
+  background:var(--bg);color:var(--text);
+  min-height:100vh;transition:background .3s,color .3s;
+}
+
+.app{display:flex;flex-direction:column;height:100vh;padding:14px;gap:10px;}
+
+/* ── topbar ── */
+.topbar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:10px 16px;
+  box-shadow:var(--shadow);
+}
+.app-title{font-size:17px;font-weight:700;white-space:nowrap;}
+.app-title span{color:var(--accent);}
+
+select#rType{
+  flex:1;max-width:310px;
+  background:var(--btn);color:var(--text);
+  border:1px solid var(--border);border-radius:8px;
+  padding:6px 10px;font-family:'Sora',sans-serif;font-size:13.5px;
+  cursor:pointer;outline:none;transition:border-color .2s;
+  appearance:auto;
+}
+select#rType:focus{border-color:var(--accent);}
+
+.tbtn{
+  background:var(--btn);color:var(--text);
+  border:1px solid var(--border);border-radius:8px;
+  padding:6px 14px;font-family:'Sora',sans-serif;font-size:13px;
+  cursor:pointer;transition:background .15s;white-space:nowrap;outline:none;
+}
+.tbtn:hover{background:var(--btn-h);}
+.spacer{flex:1;}
+
+/* ── main ── */
+.main{display:flex;gap:14px;flex:1;min-height:0;}
+
+/* ── left panel ── */
+.left{display:flex;flex-direction:column;gap:8px;width:305px;flex-shrink:0;}
+
+.sec-label{
+  font-size:11px;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.07em;padding-left:2px;
+}
+
+.tbl-wrap{
+  flex:1;overflow-y:auto;border-radius:10px;
+  border:1px solid var(--border);background:var(--surface);
+  min-height:140px;
+}
+table{width:100%;border-collapse:collapse;}
+thead th{
+  position:sticky;top:0;z-index:1;
+  background:var(--surface2);color:var(--text-muted);
+  font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;
+  padding:7px 8px;border-bottom:1px solid var(--border);text-align:center;
+}
+thead th:nth-child(1){width:46px;}
+thead th:nth-child(2),thead th:nth-child(3){width:calc((100% - 46px)/2);}
+tbody tr{border-bottom:1px solid var(--border);}
+tbody tr:last-child{border-bottom:none;}
+tbody tr:nth-child(even){background:var(--surface2);}
+tbody tr:hover{background:var(--btn-h);}
+td{padding:3px 5px;text-align:center;vertical-align:middle;}
+td input[type="checkbox"]{
+  width:16px;height:16px;accent-color:var(--accent);cursor:pointer;
+}
+td input.cell{
+  width:100%;background:transparent;color:var(--text);
+  border:none;outline:none;
+  font-family:'Fira Code',monospace;font-size:12.5px;
+  text-align:right;padding:5px 6px;border-radius:4px;transition:background .12s;
+}
+td input.cell:focus{
+  background:var(--btn-h);
+  outline:1.5px solid var(--accent);outline-offset:-1.5px;
+}
+
+/* ── buttons ── */
+.btns{display:flex;flex-direction:column;gap:5px;}
+.btn{
+  border:1px solid var(--border);border-radius:8px;
+  padding:7px 12px;font-family:'Sora',sans-serif;font-size:13.5px;
+  cursor:pointer;transition:all .15s;outline:none;
+}
+.btn-primary{
+  background:var(--danger);border-color:var(--danger);
+  color:#fff;font-weight:700;font-size:14.5px;text-align:center;
+}
+.btn-primary:hover{background:var(--danger-h);border-color:var(--danger-h);}
+.btn-sec{background:var(--btn);color:var(--text);}
+.btn-sec:hover{background:var(--btn-h);}
+
+/* ── results ── */
+.results{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:11px 13px;font-size:13px;
+  box-shadow:var(--shadow);
+}
+.res-eq{
+  font-weight:600;font-size:13.5px;color:var(--accent);
+  margin-bottom:7px;word-break:break-all;
+}
+.res-params{
+  font-family:'Fira Code',monospace;font-size:11.5px;
+  color:var(--text);line-height:1.85;
+}
+.r2{color:var(--success);font-weight:600;}
+.err{color:var(--danger);}
+
+/* ── chart ── */
+.right{
+  flex:1;background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:14px;
+  display:flex;align-items:stretch;justify-content:center;
+  min-width:0;box-shadow:var(--shadow);
+}
+.chart-wrap{width:100%;height:100%;position:relative;}
+
+/* ── scrollbar ── */
+.tbl-wrap::-webkit-scrollbar{width:5px;}
+.tbl-wrap::-webkit-scrollbar-track{background:transparent;}
+.tbl-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+
+@media(max-width:760px){
+  .app{height:auto;}
+  .main{flex-direction:column;}
+  .left{width:100%;}
+  .right{min-height:320px;}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="app-title">📊 <span>Regrese</span></div>
+    <select id="rType" onchange="autoRecompute()">
+      <option value="linear">Lineární (y = ax + b)</option>
+      <option value="exponential">Exponenciální (y = a·e^(bx))</option>
+      <option value="polynomial">Polynomiální 2° (y = ax² + bx + c)</option>
+      <option value="logarithmic">Logaritmická (y = a·ln(x) + b)</option>
+    </select>
+    <div class="spacer"></div>
+    <select class="tbtn" id="themeSelect" onchange="setTheme(this.value)">
+      <option value="system">🖥️ Systém</option>
+      <option value="light">☀️ Světlý</option>
+      <option value="dark">🌙 Tmavý</option>
+    </select>
+  </header>
+
+  <div class="main">
+    <div class="left">
+      <div class="sec-label">Zadejte data (x, y):</div>
+      <div class="tbl-wrap">
+        <table>
+          <thead><tr><th>✓</th><th>x</th><th>y</th></tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="btns">
+        <button class="btn btn-primary" onclick="computeRegression()">📊 Regrese</button>
+        <button class="btn btn-sec"     onclick="swapXY()">🔄 Prohodit x a y</button>
+        <button class="btn btn-sec"     onclick="clearData()">🗑️ Smazat data</button>
+        <button class="btn btn-sec"     onclick="saveGraph()">💾 Uložit graf jako JPG</button>
+      </div>
+
+      <div class="results">
+        <div class="res-eq"     id="resEq">—</div>
+        <div class="res-params" id="resParams"></div>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="chart-wrap">
+        <canvas id="myChart"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════
+   STATE
+══════════════════════════════════════════════ */
+let chartInst  = null;
+let isDark     = false;          // resolved effective value
+let themeChoice = 'system';      // 'system' | 'light' | 'dark'
+let lastResult = null;
+let lastData   = null;
+
+const sysMQ = window.matchMedia('(prefers-color-scheme: dark)');
+sysMQ.addEventListener('change', () => {
+  if(themeChoice === 'system') applyTheme(true);
+});
+
+function applyTheme(rerender){
+  isDark = themeChoice === 'system'
+         ? sysMQ.matches
+         : themeChoice === 'dark';
+  document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
+  if(rerender && chartInst) computeRegression();
+}
+
+function setTheme(choice){
+  themeChoice = choice;
+  applyTheme(true);
+}
+
+/* ══════════════════════════════════════════════
+   MATH UTILITIES
+══════════════════════════════════════════════ */
+const sum  = a => a.reduce((s,v)=>s+v,0);
+const mean = a => sum(a)/a.length;
+
+function calcR2(y, yp) {
+  const ym = mean(y);
+  const tot = sum(y.map(v=>(v-ym)**2));
+  const res = sum(y.map((v,i)=>(v-yp[i])**2));
+  return tot < 1e-14 ? 1 : 1 - res/tot;
+}
+
+function matT(A) {
+  return A[0].map((_,j)=>A.map(r=>r[j]));
+}
+
+function matMul(A,B) {
+  return A.map(row=>B[0].map((_,j)=>row.reduce((s,v,k)=>s+v*B[k][j],0)));
+}
+
+function inv2(M) {
+  const det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
+  if(Math.abs(det)<1e-14) throw new Error("Singulární matice – body leží na přímce?");
+  return [[ M[1][1]/det,-M[0][1]/det],
+          [-M[1][0]/det, M[0][0]/det]];
+}
+
+function inv3(M) {
+  const [a,b,c]=M[0],[d,e,f]=M[1],[g,h,k]=M[2];
+  const det = a*(e*k-f*h) - b*(d*k-f*g) + c*(d*h-e*g);
+  if(Math.abs(det)<1e-14) throw new Error("Singulární matice – zkuste jiný typ regrese.");
+  return [[(e*k-f*h)/det,(c*h-b*k)/det,(b*f-c*e)/det],
+          [(f*g-d*k)/det,(a*k-c*g)/det,(c*d-a*f)/det],
+          [(d*h-e*g)/det,(b*g-a*h)/det,(a*e-b*d)/det]];
+}
+
+function calcSE(Xd, y, yp, p) {
+  const n = y.length;
+  const s2 = sum(y.map((v,i)=>(v-yp[i])**2)) / Math.max(n-p, 1);
+  const Xt = matT(Xd);
+  const XtX = matMul(Xt, Xd);
+  const inv = p===2 ? inv2(XtX) : inv3(XtX);
+  return inv.map((_,i) => Math.sqrt(Math.max(0, inv[i][i]*s2)));
+}
+
+// Simple linear regression; returns {a:slope, b:intercept}
+function linRaw(x, y) {
+  const Xd = x.map(xi=>[xi,1]);
+  const Xt = matT(Xd);
+  const XtX = matMul(Xt,Xd);
+  const XtY = Xt.map(r=>sum(r.map((v,j)=>v*y[j])));
+  const inv = inv2(XtX);
+  const p = inv.map(r=>sum(r.map((v,j)=>v*XtY[j])));
+  return {a:p[0], b:p[1]};
+}
+
+/* ══════════════════════════════════════════════
+   REGRESSION FUNCTIONS
+══════════════════════════════════════════════ */
+function f6(v){return v>=0?v.toFixed(6):String(v.toFixed(6));}
+
+function doLinear(x,y){
+  const {a,b}=linRaw(x,y);
+  const yp=x.map(xi=>a*xi+b);
+  const r2=calcR2(y,yp);
+  const Xd=x.map(xi=>[xi,1]);
+  const [seA,seB]=calcSE(Xd,y,yp,2);
+  return{type:'linear',a,b,seA,seB,r2,yp,
+         eq:`y = ${f6(a)}x + ${f6(b)}`,
+         smooth:xi=>a*xi+b};
+}
+
+function doExponential(x,y){
+  if(y.some(v=>v<=0)) throw new Error("Exponenciální regrese vyžaduje všechny y > 0");
+  const lnY=y.map(Math.log);
+  const {a:bP, b:lnA}=linRaw(x,lnY);
+  const a=Math.exp(lnA), b=bP;
+  const yp=x.map(xi=>a*Math.exp(b*xi));
+  const r2=calcR2(y,yp);
+  const Xd=x.map(xi=>[xi,1]);
+  const [seA,seB]=calcSE(Xd,y,yp,2);
+  return{type:'exponential',a,b,seA,seB,r2,yp,
+         eq:`y = ${f6(a)}·e^(${f6(b)}x)`,
+         smooth:xi=>a*Math.exp(b*xi)};
+}
+
+function doPolynomial(x,y){
+  if(x.length<3) throw new Error("Polynomiální regrese 2° vyžaduje alespoň 3 body.");
+  const Xd=x.map(xi=>[xi*xi,xi,1]);
+  const Xt=matT(Xd);
+  const XtX=matMul(Xt,Xd);
+  const XtY=Xt.map(r=>sum(r.map((v,j)=>v*y[j])));
+  const inv=inv3(XtX);
+  const [a,b,c]=inv.map(r=>sum(r.map((v,j)=>v*XtY[j])));
+  const yp=x.map(xi=>a*xi*xi+b*xi+c);
+  const r2=calcR2(y,yp);
+  const [seA,seB,seC]=calcSE(Xd,y,yp,3);
+  return{type:'polynomial',a,b,c,seA,seB,seC,r2,yp,
+         eq:`y = ${f6(a)}x² + ${f6(b)}x + ${f6(c)}`,
+         smooth:xi=>a*xi*xi+b*xi+c};
+}
+
+function doLogarithmic(x,y){
+  if(x.some(v=>v<=0)) throw new Error("Logaritmická regrese vyžaduje všechny x > 0");
+  const lnX=x.map(Math.log);
+  const {a,b}=linRaw(lnX,y);
+  const yp=x.map(xi=>a*Math.log(Math.max(xi,1e-10))+b);
+  const r2=calcR2(y,yp);
+  const Xd=x.map(xi=>[Math.log(Math.max(xi,1e-10)),1]);
+  const [seA,seB]=calcSE(Xd,y,yp,2);
+  return{type:'logarithmic',a,b,seA,seB,r2,yp,
+         eq:`y = ${f6(a)}·ln(x) + ${f6(b)}`,
+         smooth:xi=>a*Math.log(Math.max(xi,1e-10))+b};
+}
+
+/* ══════════════════════════════════════════════
+   TABLE MANAGEMENT
+══════════════════════════════════════════════ */
+function addRow(){
+  const tb=document.getElementById('tbody');
+  const row=tb.rows.length;
+  const tr=document.createElement('tr');
+  tr.innerHTML=`
+    <td><input type="checkbox" checked onchange="autoRecompute()"></td>
+    <td><input class="cell" type="text" placeholder="" data-r="${row}" data-c="x"
+               onkeydown="handleKey(event,${row},'x')" oninput="autoRecompute()"></td>
+    <td><input class="cell" type="text" placeholder="" data-r="${row}" data-c="y"
+               onkeydown="handleKey(event,${row},'y')" oninput="autoRecompute()"></td>`;
+  tb.appendChild(tr);
+}
+
+function handleKey(e,row,col){
+  if(e.key!=='Enter') return;
+  e.preventDefault();
+  if(col==='x'){
+    focusCell(row,'y');
+  } else {
+    const tb=document.getElementById('tbody');
+    if(row===tb.rows.length-1) addRow();
+    focusCell(row+1,'x');
+  }
+}
+
+function focusCell(row,col){
+  const el=document.querySelector(`[data-r="${row}"][data-c="${col}"]`);
+  if(el) el.focus();
+}
+
+function initTable(){
+  for(let i=0;i<6;i++) addRow();
+}
+
+function getTableData(){
+  const tb=document.getElementById('tbody');
+  const x=[],y=[],excl=[];
+  for(let i=0;i<tb.rows.length;i++){
+    const row=tb.rows[i];
+    const cb=row.cells[0].querySelector('input[type="checkbox"]');
+    const xv=row.cells[1].querySelector('input').value.trim().replace(',','.');
+    const yv=row.cells[2].querySelector('input').value.trim().replace(',','.');
+    if(!xv||!yv) continue;
+    const xf=parseFloat(xv), yf=parseFloat(yv);
+    if(isNaN(xf)||isNaN(yf)) continue;
+    if(cb&&cb.checked){ x.push(xf); y.push(yf); }
+    else excl.push([xf,yf]);
+  }
+  return{x,y,excl};
+}
+
+/* ══════════════════════════════════════════════
+   COMPUTE
+══════════════════════════════════════════════ */
+let recomputeTimer=null;
+function autoRecompute(){
+  clearTimeout(recomputeTimer);
+  recomputeTimer=setTimeout(computeRegression,350);
+}
+
+function computeRegression(){
+  const {x,y,excl}=getTableData();
+  const eqEl=document.getElementById('resEq');
+  const pmEl=document.getElementById('resParams');
+
+  if(x.length<2){
+    eqEl.innerHTML='<span class="err">❗ Zadejte alespoň 2 zaškrtnuté body.</span>';
+    pmEl.innerHTML='';
+    clearChart();
+    return;
+  }
+
+  const type=document.getElementById('rType').value;
+  let result;
+  try{
+    if(type==='linear')       result=doLinear(x,y);
+    else if(type==='exponential') result=doExponential(x,y);
+    else if(type==='polynomial')  result=doPolynomial(x,y);
+    else if(type==='logarithmic') result=doLogarithmic(x,y);
+  }catch(err){
+    eqEl.innerHTML=`<span class="err">❗ ${err.message}</span>`;
+    pmEl.innerHTML='';
+    return;
+  }
+
+  displayResults(result, x.length, x.length+excl.length);
+  lastResult = result;
+  lastData   = {x, y, excl};
+  updateChart(result, x, y, excl);
+}
+
+/* ══════════════════════════════════════════════
+   DISPLAY RESULTS
+══════════════════════════════════════════════ */
+function displayResults(r, used, total){
+  document.getElementById('resEq').innerHTML=`📈 ${r.eq}`;
+  let html=`• a = (${f6(r.a)} ± ${f6(r.seA)})<br>`
+          +`• b = (${f6(r.b)} ± ${f6(r.seB)})<br>`;
+  if(r.type==='polynomial')
+    html+=`• c = (${f6(r.c)} ± ${f6(r.seC)})<br>`;
+  html+=`• R² = <span class="r2">${r.r2.toFixed(6)}</span><br>`
+       +`• Použito bodů: ${used} / ${total}`;
+  document.getElementById('resParams').innerHTML=html;
+}
+
+/* ══════════════════════════════════════════════
+   CHART
+══════════════════════════════════════════════ */
+function chartColors(){
+  return isDark
+    ? {bg:'#1c1c24',grid:'rgba(255,255,255,.08)',tick:'#a0a0b8',axis:'#505068'}
+    : {bg:'#fafafa', grid:'rgba(0,0,0,.07)',     tick:'#444456',axis:'#ccccd8'};
+}
+
+function clearChart(){
+  if(chartInst){chartInst.destroy();chartInst=null;}
+  const c=chartColors();
+  const canvas=document.getElementById('myChart');
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle=c.bg;
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+}
+
+function updateChart(result, x, y, excl){
+  if(chartInst){chartInst.destroy();chartInst=null;}
+
+  // Smooth curve – 120 points
+  const xMin=Math.min(...x), xMax=Math.max(...x);
+  const step=(xMax-xMin)/119||1;
+  const xSmooth=Array.from({length:120},(_,i)=>xMin+i*step);
+  let ySmooth;
+  try{ ySmooth=xSmooth.map(result.smooth); }
+  catch(e){ ySmooth=xSmooth.map(()=>NaN); }
+
+  const c=chartColors();
+  const datasets=[];
+
+  if(excl.length>0){
+    datasets.push({
+      type:'scatter',label:`Vyloučeno (${excl.length})`,
+      data:excl.map(p=>({x:p[0],y:p[1]})),
+      backgroundColor:'rgba(255,80,80,.5)',borderColor:'#ff5050',
+      pointStyle:'crossRot',pointRadius:9,pointBorderWidth:2.5,order:1
+    });
+  }
+
+  datasets.push({
+    type:'scatter',label:'Data',
+    data:x.map((xi,i)=>({x:xi,y:y[i]})),
+    backgroundColor:'#4a9eff',borderColor:'rgba(255,255,255,.7)',
+    borderWidth:1.5,pointRadius:6,order:2
+  });
+
+  datasets.push({
+    type:'line',label:result.eq,
+    data:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]})),
+    borderColor:'#ff6b6b',borderWidth:2.5,
+    pointRadius:0,fill:false,tension:0,order:3
+  });
+
+  const ctx=document.getElementById('myChart').getContext('2d');
+  chartInst=new Chart(ctx,{
+    type:'scatter',
+    data:{datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      animation:{duration:300},
+      scales:{
+        x:{type:'linear',
+           grid:{color:c.grid},
+           ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
+           border:{color:c.axis},
+           title:{display:true,text:'x',color:c.tick,font:{family:'Sora',size:12}}},
+        y:{type:'linear',
+           grid:{color:c.grid},
+           ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
+           border:{color:c.axis},
+           title:{display:true,text:'y',color:c.tick,font:{family:'Sora',size:12}}}
+      },
+      plugins:{
+        legend:{
+          labels:{color:c.tick,usePointStyle:true,
+                  font:{family:'Sora',size:11},boxWidth:10,padding:14}
+        },
+        tooltip:{
+          callbacks:{
+            label:ctx=>{
+              const d=ctx.raw;
+              return ` (${d.x}, ${typeof d.y==='number'?d.y.toPrecision(6):d.y})`;
+            }
+          }
+        }
+      },
+      backgroundColor:c.bg
+    },
+    plugins:[{
+      id:'bgFill',
+      beforeDraw(chart){
+        const{ctx:c2,chartArea}=chart;
+        if(!chartArea) return;
+        c2.save();
+        c2.fillStyle=isDark?'#1c1c24':'#fafafa';
+        c2.fillRect(chartArea.left,chartArea.top,chartArea.width,chartArea.height);
+        c2.restore();
+      }
+    }]
+  });
+}
+
+/* ══════════════════════════════════════════════
+   ACTIONS
+══════════════════════════════════════════════ */
+function swapXY(){
+  const tb=document.getElementById('tbody');
+  for(let i=0;i<tb.rows.length;i++){
+    const xI=tb.rows[i].cells[1].querySelector('input');
+    const yI=tb.rows[i].cells[2].querySelector('input');
+    [xI.value,yI.value]=[yI.value,xI.value];
+  }
+  computeRegression();
+}
+
+function clearData(){
+  const tb=document.getElementById('tbody');
+  tb.innerHTML='';
+  for(let i=0;i<6;i++) addRow();
+  document.getElementById('resEq').textContent='—';
+  document.getElementById('resParams').textContent='';
+  clearChart();
+}
+
+function saveGraph(){
+  if(!lastResult||!lastData){alert('Nejprve proveďte regresi.');return;}
+  const {x,y,excl}=lastData, result=lastResult;
+
+  // Offscreen canvas – vždy světlé barvy
+  const tmp=document.createElement('canvas');
+  tmp.width=900; tmp.height=600;
+  document.body.appendChild(tmp);
+
+  const lc={bg:'#fafafa',grid:'rgba(0,0,0,.07)',tick:'#33334a',axis:'#cccccc'};
+
+  const xMin=Math.min(...x),xMax=Math.max(...x);
+  const step=(xMax-xMin)/119||1;
+  const xSmooth=Array.from({length:120},(_,i)=>xMin+i*step);
+  let ySmooth;
+  try{ySmooth=xSmooth.map(result.smooth);}catch(e){ySmooth=xSmooth.map(()=>NaN);}
+
+  const ds=[];
+  if(excl.length>0) ds.push({
+    type:'scatter',label:`Vyloučeno (${excl.length})`,
+    data:excl.map(p=>({x:p[0],y:p[1]})),
+    backgroundColor:'rgba(200,50,50,.4)',borderColor:'#cc3030',
+    pointStyle:'crossRot',pointRadius:9,pointBorderWidth:2.5,order:1
+  });
+  ds.push({
+    type:'scatter',label:'Data',
+    data:x.map((xi,i)=>({x:xi,y:y[i]})),
+    backgroundColor:'#2264c0',borderColor:'rgba(0,0,0,.25)',
+    borderWidth:1.5,pointRadius:6,order:2
+  });
+  ds.push({
+    type:'line',label:result.eq,
+    data:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]})),
+    borderColor:'#cc3030',borderWidth:2.5,pointRadius:0,fill:false,tension:0,order:3
+  });
+
+  const ec=new Chart(tmp,{
+    type:'scatter',data:{datasets:ds},
+    options:{
+      responsive:false,animation:false,
+      scales:{
+        x:{type:'linear',grid:{color:lc.grid},
+           ticks:{color:lc.tick,font:{family:'Fira Code',size:11}},
+           border:{color:lc.axis},
+           title:{display:true,text:'x',color:lc.tick,font:{family:'Sora',size:12}}},
+        y:{type:'linear',grid:{color:lc.grid},
+           ticks:{color:lc.tick,font:{family:'Fira Code',size:11}},
+           border:{color:lc.axis},
+           title:{display:true,text:'y',color:lc.tick,font:{family:'Sora',size:12}}}
+      },
+      plugins:{
+        legend:{labels:{color:lc.tick,usePointStyle:true,
+                        font:{family:'Sora',size:11},boxWidth:10,padding:14}},
+        tooltip:{enabled:false}
+      }
+    },
+    plugins:[{id:'bg',beforeDraw(ch){
+      const{ctx:c2,chartArea:ca}=ch;
+      if(!ca) return;
+      c2.save();c2.fillStyle='#ffffff';
+      c2.fillRect(0,0,tmp.width,tmp.height);
+      c2.restore();
+    }}]
+  });
+
+  setTimeout(()=>{
+    const a=document.createElement('a');
+    a.href=tmp.toDataURL('image/jpeg',0.96);
+    a.download='regrese.jpg';
+    a.click();
+    ec.destroy();
+    document.body.removeChild(tmp);
+  },120);
+}
+
+/* ══════════════════════════════════════════════
+   INIT
+══════════════════════════════════════════════ */
+applyTheme(false);
+initTable();
+</script>
+</body>
+</html>
