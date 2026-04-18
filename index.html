@@ -151,6 +151,17 @@ td input.cell:focus{
   min-width:0;box-shadow:var(--shadow);
 }
 .chart-wrap{width:100%;height:100%;position:relative;}
+.sel-overlay{
+  position:absolute;inset:0;z-index:10;
+  display:none;cursor:crosshair;
+}
+.sel-overlay.active{display:block;}
+.sel-rect{
+  position:absolute;
+  border:2px solid var(--accent);
+  background:rgba(74,158,255,.12);
+  pointer-events:none;
+}
 
 /* ── scrollbar ── */
 .tbl-wrap::-webkit-scrollbar{width:5px;}
@@ -195,6 +206,9 @@ td input.cell:focus{
 
       <div class="btns">
         <button class="btn btn-primary" id="btn-regrese" onclick="toggleRegression()">📊 Regrese</button>
+        <button class="btn btn-sec"     onclick="document.getElementById('file-input').click()">📂 Načíst soubor</button>
+        <input type="file" id="file-input" accept=".txt,.csv,.tsv,.dat" style="display:none" onchange="loadFile(this)">
+        <button class="btn btn-sec" id="btn-select" onclick="toggleSelectMode()">⬚ Vybrat oblast</button>
         <button class="btn btn-sec"     onclick="swapXY()">🔄 Prohodit x a y</button>
         <button class="btn btn-sec"     onclick="clearData()">🗑️ Smazat data</button>
         <button class="btn btn-sec"     onclick="saveGraph()">💾 Uložit graf jako JPG</button>
@@ -209,6 +223,7 @@ td input.cell:focus{
     <div class="right">
       <div class="chart-wrap">
         <canvas id="myChart"></canvas>
+        <div class="sel-overlay" id="sel-overlay"></div>
       </div>
     </div>
   </div>
@@ -223,7 +238,8 @@ let isDark     = false;
 let themeChoice = 'system';
 let lastResult = null;
 let lastData   = null;
-let regressionOn = false; // false = jen body, true = body + regresní křivka
+let regressionOn = false;
+let axisLabels = {x:'x', y:'y'};
 
 const sysMQ = window.matchMedia('(prefers-color-scheme: dark)');
 sysMQ.addEventListener('change', () => {
@@ -492,8 +508,8 @@ function showPointsOnly(){
     options:{
       responsive:true,maintainAspectRatio:false,animation:{duration:200},
       scales:{
-        x:{type:'linear',grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:'x',color:c.tick,font:{family:'Sora',size:12}}},
-        y:{type:'linear',grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:'y',color:c.tick,font:{family:'Sora',size:12}}}
+        x:{type:'linear',grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:axisLabels.x,color:c.tick,font:{family:'Sora',size:12}}},
+        y:{type:'linear',grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:axisLabels.y,color:c.tick,font:{family:'Sora',size:12}}}
       },
       plugins:{
         legend:{labels:{color:c.tick,usePointStyle:true,font:{family:'Sora',size:11},boxWidth:10,padding:14}},
@@ -617,12 +633,12 @@ function updateChart(result, x, y, excl){
            grid:{color:c.grid},
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
-           title:{display:true,text:'x',color:c.tick,font:{family:'Sora',size:12}}},
+           title:{display:true,text:axisLabels.x,color:c.tick,font:{family:'Sora',size:12}}},
         y:{type:'linear',
            grid:{color:c.grid},
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
-           title:{display:true,text:'y',color:c.tick,font:{family:'Sora',size:12}}}
+           title:{display:true,text:axisLabels.y,color:c.tick,font:{family:'Sora',size:12}}}
       },
       plugins:{
         legend:{
@@ -657,6 +673,184 @@ function updateChart(result, x, y, excl){
 /* ══════════════════════════════════════════════
    ACTIONS
 ══════════════════════════════════════════════ */
+/* ══════════════════════════════════════════════
+   FILE IMPORT
+══════════════════════════════════════════════ */
+function loadFile(input){
+  const file=input.files[0];
+  if(!file) return;
+  input.value=''; // reset so same file can be re-loaded
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const text=e.target.result;
+    parseAndFill(text);
+  };
+  reader.readAsText(file);
+}
+
+function parseAndFill(text){
+  const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
+  if(!lines.length) return;
+
+  // Detect separator: try tab, semicolon, comma, multiple spaces
+  function splitLine(line){
+    if(line.includes('\t'))  return line.split('\t').map(s=>s.trim());
+    if(line.includes(';'))   return line.split(';').map(s=>s.trim());
+    if(line.includes(','))   return line.split(',').map(s=>s.trim());
+    return line.split(/\s+/).filter(s=>s!=='');
+  }
+
+  // Detect header: first line contains non-numeric token
+  let headerX='x', headerY='y', dataStart=0;
+  const firstParts=splitLine(lines[0]);
+  if(firstParts.length>=2 && (isNaN(firstParts[0].replace(',','.')) || isNaN(firstParts[1].replace(',','.')))){
+    headerX=firstParts[0]||'x';
+    headerY=firstParts[1]||'y';
+    dataStart=1;
+  }
+  axisLabels={x:headerX, y:headerY};
+
+  // Parse data rows
+  const rows=[];
+  for(let i=dataStart;i<lines.length;i++){
+    const parts=splitLine(lines[i]);
+    if(parts.length<2) continue;
+    const xv=parseFloat(parts[0].replace(',','.'));
+    const yv=parseFloat(parts[1].replace(',','.'));
+    if(!isNaN(xv)&&!isNaN(yv)) rows.push([xv,yv]);
+  }
+  if(!rows.length){ alert('Nepodařilo se načíst žádná data.'); return; }
+
+  // Fill table
+  const tb=document.getElementById('tbody');
+  tb.innerHTML='';
+  regressionOn=false;
+  document.getElementById('btn-regrese').textContent='📊 Regrese';
+  document.getElementById('resEq').textContent='—';
+  document.getElementById('resParams').textContent='';
+
+  rows.forEach(([xv,yv],i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="row-num">${i+1}</td>
+      <td><input type="checkbox" checked onchange="autoRecompute()"></td>
+      <td><input class="cell" type="text" value="${xv}" data-r="${i}" data-c="x"
+                 onkeydown="handleKey(event,${i},'x')" oninput="autoRecompute()"></td>
+      <td><input class="cell" type="text" value="${yv}" data-r="${i}" data-c="y"
+                 onkeydown="handleKey(event,${i},'y')" oninput="autoRecompute()"></td>`;
+    tb.appendChild(tr);
+  });
+  // always keep at least one empty row at the end
+  addRow();
+  updateMasterCheckbox();
+  showPointsOnly();
+  document.getElementById('resEq').innerHTML=
+    `<span style="color:var(--success)">✅ Načteno ${rows.length} bodů${dataStart?` · osy: ${headerX}, ${headerY}`:''}</span>`;
+}
+
+/* ══════════════════════════════════════════════
+   RECTANGLE SELECTION
+══════════════════════════════════════════════ */
+let selectMode=false;
+let selStart=null, selRect=null;
+
+function toggleSelectMode(){
+  selectMode=!selectMode;
+  const btn=document.getElementById('btn-select');
+  const overlay=document.getElementById('sel-overlay');
+  if(selectMode){
+    btn.textContent='✕ Zrušit výběr';
+    btn.style.borderColor='var(--accent)';
+    btn.style.color='var(--accent)';
+    overlay.classList.add('active');
+    // uncheck all points
+    const tb=document.getElementById('tbody');
+    tb.querySelectorAll('input[type="checkbox"]').forEach(cb=>cb.checked=false);
+    updateMasterCheckbox();
+    if(regressionOn) computeRegression(); else showPointsOnly();
+  } else {
+    exitSelectMode();
+  }
+}
+
+function exitSelectMode(){
+  selectMode=false;
+  const btn=document.getElementById('btn-select');
+  btn.textContent='⬚ Vybrat oblast';
+  btn.style.borderColor='';
+  btn.style.color='';
+  const overlay=document.getElementById('sel-overlay');
+  overlay.classList.remove('active');
+  // remove rect if any
+  const r=overlay.querySelector('.sel-rect');
+  if(r) r.remove();
+  selStart=null; selRect=null;
+}
+
+function getOverlayPos(e, overlay){
+  const rect=overlay.getBoundingClientRect();
+  return {x:e.clientX-rect.left, y:e.clientY-rect.top};
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  const overlay=document.getElementById('sel-overlay');
+
+  overlay.addEventListener('mousedown',e=>{
+    if(!selectMode) return;
+    selStart=getOverlayPos(e,overlay);
+    // create rect element
+    const r=document.createElement('div');
+    r.className='sel-rect';
+    r.style.left=selStart.x+'px'; r.style.top=selStart.y+'px';
+    r.style.width='0'; r.style.height='0';
+    overlay.appendChild(r);
+    selRect=r;
+    e.preventDefault();
+  });
+
+  overlay.addEventListener('mousemove',e=>{
+    if(!selectMode||!selStart||!selRect) return;
+    const pos=getOverlayPos(e,overlay);
+    const x=Math.min(pos.x,selStart.x), y=Math.min(pos.y,selStart.y);
+    const w=Math.abs(pos.x-selStart.x), h=Math.abs(pos.y-selStart.y);
+    selRect.style.left=x+'px'; selRect.style.top=y+'px';
+    selRect.style.width=w+'px'; selRect.style.height=h+'px';
+    e.preventDefault();
+  });
+
+  overlay.addEventListener('mouseup',e=>{
+    if(!selectMode||!selStart||!selRect||!chartInst) return;
+    const pos=getOverlayPos(e,overlay);
+
+    // pixel bounds of selection
+    const px1=Math.min(selStart.x,pos.x), px2=Math.max(selStart.x,pos.x);
+    const py1=Math.min(selStart.y,pos.y), py2=Math.max(selStart.y,pos.y);
+
+    // convert to data coords via chart scales
+    const xScale=chartInst.scales.x, yScale=chartInst.scales.y;
+    const dxMin=xScale.getValueForPixel(px1), dxMax=xScale.getValueForPixel(px2);
+    const dyMin=yScale.getValueForPixel(py2), dyMax=yScale.getValueForPixel(py1);
+
+    // check rows whose data falls inside
+    const tb=document.getElementById('tbody');
+    let found=0;
+    for(let i=0;i<tb.rows.length;i++){
+      const xv=parseFloat(tb.rows[i].cells[2]?.querySelector('input')?.value?.replace(',','.'));
+      const yv=parseFloat(tb.rows[i].cells[3]?.querySelector('input')?.value?.replace(',','.'));
+      if(!isNaN(xv)&&!isNaN(yv) && xv>=dxMin&&xv<=dxMax && yv>=dyMin&&yv<=dyMax){
+        const cb=tb.rows[i].cells[1]?.querySelector('input[type="checkbox"]');
+        if(cb){ cb.checked=true; found++; }
+      }
+    }
+
+    // clean up
+    selRect.remove(); selRect=null; selStart=null;
+    exitSelectMode();
+    updateMasterCheckbox();
+    if(regressionOn) computeRegression(); else showPointsOnly();
+  });
+});
+
 function swapXY(){
   const tb=document.getElementById('tbody');
   for(let i=0;i<tb.rows.length;i++){
@@ -724,11 +918,11 @@ function saveGraph(){
         x:{type:'linear',grid:{color:lc.grid},
            ticks:{color:lc.tick,font:{family:'Fira Code',size:11}},
            border:{color:lc.axis},
-           title:{display:true,text:'x',color:lc.tick,font:{family:'Sora',size:12}}},
+           title:{display:true,text:axisLabels.x,color:lc.tick,font:{family:'Sora',size:12}}},
         y:{type:'linear',grid:{color:lc.grid},
            ticks:{color:lc.tick,font:{family:'Fira Code',size:11}},
            border:{color:lc.axis},
-           title:{display:true,text:'y',color:lc.tick,font:{family:'Sora',size:12}}}
+           title:{display:true,text:axisLabels.y,color:lc.tick,font:{family:'Sora',size:12}}}
       },
       plugins:{
         legend:{labels:{color:lc.tick,usePointStyle:true,
