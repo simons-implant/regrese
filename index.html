@@ -188,13 +188,13 @@ td input.cell:focus{
       <div class="sec-label">Zadejte data (x, y):</div>
       <div class="tbl-wrap">
         <table>
-          <thead><tr><th>#</th><th>✓</th><th>x</th><th>y</th></tr></thead>
+          <thead><tr><th>#</th><th><input type="checkbox" id="cb-all" checked onchange="toggleAll(this.checked)" title="Zaškrtnout/odškrtnout vše"></th><th>x</th><th>y</th></tr></thead>
           <tbody id="tbody"></tbody>
         </table>
       </div>
 
       <div class="btns">
-        <button class="btn btn-primary" onclick="computeRegression()">📊 Regrese</button>
+        <button class="btn btn-primary" id="btn-regrese" onclick="toggleRegression()">📊 Regrese</button>
         <button class="btn btn-sec"     onclick="swapXY()">🔄 Prohodit x a y</button>
         <button class="btn btn-sec"     onclick="clearData()">🗑️ Smazat data</button>
         <button class="btn btn-sec"     onclick="saveGraph()">💾 Uložit graf jako JPG</button>
@@ -219,10 +219,11 @@ td input.cell:focus{
    STATE
 ══════════════════════════════════════════════ */
 let chartInst  = null;
-let isDark     = false;          // resolved effective value
-let themeChoice = 'system';      // 'system' | 'light' | 'dark'
+let isDark     = false;
+let themeChoice = 'system';
 let lastResult = null;
 let lastData   = null;
+let regressionOn = false; // false = jen body, true = body + regresní křivka
 
 const sysMQ = window.matchMedia('(prefers-color-scheme: dark)');
 sysMQ.addEventListener('change', () => {
@@ -418,8 +419,89 @@ function getTableData(){
 ══════════════════════════════════════════════ */
 let recomputeTimer=null;
 function autoRecompute(){
+  updateMasterCheckbox();
+  clearTimeout(recomputeTimer);
+  recomputeTimer=setTimeout(()=>{
+    if(regressionOn) computeRegression();
+    else showPointsOnly();
+  },350);
+}
+
+function toggleAll(checked){
+  const tb=document.getElementById('tbody');
+  for(let i=0;i<tb.rows.length;i++){
+    const cb=tb.rows[i].cells[1].querySelector('input[type="checkbox"]');
+    if(cb) cb.checked=checked;
+  }
   clearTimeout(recomputeTimer);
   recomputeTimer=setTimeout(computeRegression,350);
+}
+
+function updateMasterCheckbox(){
+  const tb=document.getElementById('tbody');
+  const cbs=[...tb.querySelectorAll('input[type="checkbox"]')];
+  if(!cbs.length) return;
+  const all=cbs.every(c=>c.checked);
+  const none=cbs.every(c=>!c.checked);
+  const master=document.getElementById('cb-all');
+  if(master){ master.checked=all; master.indeterminate=!all&&!none; }
+}
+
+function toggleRegression(){
+  if(!regressionOn){
+    regressionOn=true;
+    computeRegression();
+  } else {
+    regressionOn=false;
+    document.getElementById('btn-regrese').textContent='📊 Regrese';
+    document.getElementById('resEq').textContent='—';
+    document.getElementById('resParams').textContent='';
+    lastResult=null;
+    showPointsOnly();
+  }
+}
+
+function showPointsOnly(){
+  // zobraz všechny body z tabulky bez regresní křivky
+  const {x,y,excl}=getTableData();
+  const allX=[...x,...excl.map(p=>p[0])];
+  const allY=[...y,...excl.map(p=>p[1])];
+  if(!allX.length){ clearChart(); return; }
+
+  if(chartInst){chartInst.destroy();chartInst=null;}
+  const c=chartColors();
+  const datasets=[];
+
+  if(excl.length>0) datasets.push({
+    type:'scatter',label:`Vyloučeno (${excl.length})`,
+    data:excl.map(p=>({x:p[0],y:p[1]})),
+    backgroundColor:'transparent',borderColor:'#4a9eff',
+    pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:1
+  });
+
+  if(x.length>0) datasets.push({
+    type:'scatter',label:'Data',
+    data:x.map((xi,i)=>({x:xi,y:y[i]})),
+    backgroundColor:'#4a9eff',borderColor:'rgba(255,255,255,.7)',
+    borderWidth:1.5,pointRadius:6,order:2
+  });
+
+  const ctx=document.getElementById('myChart').getContext('2d');
+  chartInst=new Chart(ctx,{
+    type:'scatter',data:{datasets},
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:{duration:200},
+      scales:{
+        x:{type:'linear',grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:'x',color:c.tick,font:{family:'Sora',size:12}}},
+        y:{type:'linear',grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:'y',color:c.tick,font:{family:'Sora',size:12}}}
+      },
+      plugins:{
+        legend:{labels:{color:c.tick,usePointStyle:true,font:{family:'Sora',size:11},boxWidth:10,padding:14}},
+        tooltip:{callbacks:{label:ctx=>{const d=ctx.raw;return ` (${d.x}, ${typeof d.y==='number'?d.y.toPrecision(6):d.y})`;}}}
+      }
+    },
+    plugins:[{id:'bgFill',beforeDraw(chart){const{ctx:c2,chartArea}=chart;if(!chartArea)return;c2.save();c2.fillStyle=isDark?'#1c1c24':'#fafafa';c2.fillRect(chartArea.left,chartArea.top,chartArea.width,chartArea.height);c2.restore();}}]
+  });
 }
 
 function computeRegression(){
@@ -430,14 +512,15 @@ function computeRegression(){
   if(x.length<2){
     eqEl.innerHTML='<span class="err">❗ Zadejte alespoň 2 zaškrtnuté body.</span>';
     pmEl.innerHTML='';
-    clearChart();
+    // i přesto zobraz vyloučené body
+    showPointsOnly();
     return;
   }
 
   const type=document.getElementById('rType').value;
   let result;
   try{
-    if(type==='linear')       result=doLinear(x,y);
+    if(type==='linear')           result=doLinear(x,y);
     else if(type==='exponential') result=doExponential(x,y);
     else if(type==='polynomial')  result=doPolynomial(x,y);
     else if(type==='logarithmic') result=doLogarithmic(x,y);
@@ -448,8 +531,8 @@ function computeRegression(){
   }
 
   displayResults(result, x.length, x.length+excl.length);
-  lastResult = result;
-  lastData   = {x, y, excl};
+  lastResult=result; lastData={x,y,excl};
+  document.getElementById('btn-regrese').textContent='✕ Skrýt regresi';
   updateChart(result, x, y, excl);
 }
 
@@ -503,8 +586,8 @@ function updateChart(result, x, y, excl){
     datasets.push({
       type:'scatter',label:`Vyloučeno (${excl.length})`,
       data:excl.map(p=>({x:p[0],y:p[1]})),
-      backgroundColor:'rgba(255,80,80,.5)',borderColor:'#ff5050',
-      pointStyle:'crossRot',pointRadius:9,pointBorderWidth:2.5,order:1
+      backgroundColor:'transparent',borderColor:'#4a9eff',
+      pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:1
     });
   }
 
@@ -577,15 +660,18 @@ function updateChart(result, x, y, excl){
 function swapXY(){
   const tb=document.getElementById('tbody');
   for(let i=0;i<tb.rows.length;i++){
-    const xI=tb.rows[i].cells[1].querySelector('input');
-    const yI=tb.rows[i].cells[2].querySelector('input');
+    const xI=tb.rows[i].cells[2].querySelector('input');
+    const yI=tb.rows[i].cells[3].querySelector('input');
     [xI.value,yI.value]=[yI.value,xI.value];
   }
-  computeRegression();
+  if(regressionOn) computeRegression();
+  else showPointsOnly();
 }
 
 function clearData(){
   if(!confirm('Opravdu smazat všechna data?')) return;
+  regressionOn=false;
+  document.getElementById('btn-regrese').textContent='📊 Regrese';
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
   for(let i=0;i<6;i++) addRow();
@@ -615,8 +701,8 @@ function saveGraph(){
   if(excl.length>0) ds.push({
     type:'scatter',label:`Vyloučeno (${excl.length})`,
     data:excl.map(p=>({x:p[0],y:p[1]})),
-    backgroundColor:'rgba(200,50,50,.4)',borderColor:'#cc3030',
-    pointStyle:'crossRot',pointRadius:9,pointBorderWidth:2.5,order:1
+    backgroundColor:'transparent',borderColor:'#2264c0',
+    pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:1
   });
   ds.push({
     type:'scatter',label:'Data',
