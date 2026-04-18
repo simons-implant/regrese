@@ -664,10 +664,11 @@ function displayResults(r, used, total){
   document.getElementById('resEq').innerHTML=`📈 ${r.eq}`;
   let html='';
   if(r.type==='gaussian'){
-    html+=`• amplituda: A = (${f6(r.a)} ± ${f6(r.seA)})<br>`
-         +`• poloha peaku: μ = (${f6(r.b)} ± ${f6(r.seB)})<br>`
-         +`• sigma: σ = (${f6(r.c)} ± ${f6(r.seC)})<br>`
-         +`• <b>pološířka: FWHM = (${f6(r.FWHM)} ± ${f6(r.seFWHM)})</b><br>`;
+    html+=`• A = (${f6(r.a)} ± ${f6(r.seA)})<br>`
+         +`• μ = (${f6(r.b)} ± ${f6(r.seB)})<br>`
+         +`• σ = (${f6(r.c)} ± ${f6(r.seC)})<br>`
+         +`• FWHM = (${f6(r.FWHM)} ± ${f6(r.seFWHM)})<br>`
+         +`• c = (${f6(r.d)} ± ${f6(r.seD)})<br>`;
   } else {
     html+=`• a = (${f6(r.a)} ± ${f6(r.seA)})<br>`
          +`• b = (${f6(r.b)} ± ${f6(r.seB)})<br>`;
