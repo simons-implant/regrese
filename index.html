@@ -185,6 +185,7 @@ td input.cell:focus{
       <option value="exponential">Exponenciální (y = a·e^(bx))</option>
       <option value="polynomial">Polynomiální 2° (y = ax² + bx + c)</option>
       <option value="logarithmic">Logaritmická (y = a·ln(x) + b)</option>
+      <option value="gaussian">Gaussovská (y = A·e^(-(x-μ)²/2σ²) + c)</option>
     </select>
     <div class="spacer"></div>
     <select class="tbtn" id="themeSelect" onchange="setTheme(this.value)">
@@ -375,6 +376,109 @@ function doLogarithmic(x,y){
          smooth:xi=>a*Math.log(Math.max(xi,1e-10))+b};
 }
 
+/* ── Gauss-Jordan solver (pro LM) ── */
+function solveGE(A,b){
+  const n=b.length;
+  const M=A.map((row,i)=>[...row,b[i]]);
+  for(let col=0;col<n;col++){
+    let maxRow=col;
+    for(let row=col+1;row<n;row++) if(Math.abs(M[row][col])>Math.abs(M[maxRow][col])) maxRow=row;
+    [M[col],M[maxRow]]=[M[maxRow],M[col]];
+    if(Math.abs(M[col][col])<1e-14) continue;
+    for(let row=0;row<n;row++){
+      if(row===col) continue;
+      const f=M[row][col]/M[col][col];
+      for(let k=col;k<=n;k++) M[row][k]-=f*M[col][k];
+    }
+  }
+  return M.map((row,i)=>row[n]/row[i]);
+}
+
+/* ── Levenberg-Marquardt ── */
+function lmFit(xd,yd,p0,fn,jac,maxIter=400,tol=1e-10){
+  let p=[...p0], lam=0.01;
+  const res=p=>xd.map((xi,i)=>yd[i]-fn(xi,p));
+  const sse=p=>res(p).reduce((s,r)=>s+r*r,0);
+  for(let iter=0;iter<maxIter;iter++){
+    const r=res(p);
+    const J=xd.map(xi=>jac(xi,p));
+    const m=p.length;
+    const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>J.reduce((s,j)=>s+j[a]*j[b],0)));
+    const Jtr=Array.from({length:m},(_,a)=>J.reduce((s,j,i)=>s+j[a]*r[i],0));
+    const Alam=JtJ.map((row,i)=>row.map((v,j)=>i===j?v*(1+lam):v));
+    let dp; try{dp=solveGE(Alam,Jtr);}catch(e){break;}
+    const pNew=p.map((v,i)=>v+dp[i]);
+    if(sse(pNew)<sse(p)){
+      p=pNew; lam=Math.max(lam/10,1e-8);
+      if(Math.sqrt(dp.reduce((s,v)=>s+v*v,0))<tol) break;
+    } else { lam=Math.min(lam*10,1e8); }
+  }
+  return p;
+}
+
+/* ── 4×4 matrix inverse (pro SE gaussovky) ── */
+function inv4(A){
+  const n=4;
+  const M=A.map((row,i)=>[...row,...Array.from({length:n},(_,j)=>i===j?1:0)]);
+  for(let col=0;col<n;col++){
+    let maxRow=col;
+    for(let row=col+1;row<n;row++) if(Math.abs(M[row][col])>Math.abs(M[maxRow][col])) maxRow=row;
+    [M[col],M[maxRow]]=[M[maxRow],M[col]];
+    if(Math.abs(M[col][col])<1e-14) return null;
+    const sc=M[col][col];
+    for(let k=0;k<2*n;k++) M[col][k]/=sc;
+    for(let row=0;row<n;row++){
+      if(row===col) continue;
+      const f=M[row][col];
+      for(let k=0;k<2*n;k++) M[row][k]-=f*M[col][k];
+    }
+  }
+  return M.map(row=>row.slice(n));
+}
+
+function doGaussian(x,y){
+  if(x.length<5) throw new Error("Gaussovský fit vyžaduje alespoň 5 bodů.");
+  // Počáteční odhady
+  const ymax=Math.max(...y), ymin=Math.min(...y);
+  const A0=ymax-ymin;
+  const mu0=x[y.indexOf(ymax)];
+  const c0=ymin;
+  // Odhad sigma z šířky v polovině maxima
+  const half=c0+A0/2;
+  const above=x.filter((_,i)=>y[i]>=half);
+  const sig0=above.length>1?(Math.max(...above)-Math.min(...above))/2.355 : (Math.max(...x)-Math.min(...x))/6;
+
+  const fn=(xi,[A,mu,sig,c])=>A*Math.exp(-((xi-mu)**2)/(2*sig**2))+c;
+  const jac=(xi,[A,mu,sig,c])=>{
+    const e=Math.exp(-((xi-mu)**2)/(2*sig**2));
+    return[e, A*e*(xi-mu)/sig**2, A*e*(xi-mu)**2/sig**3, 1];
+  };
+
+  let [A,mu,sig,c]=lmFit(x,y,[A0,mu0,Math.abs(sig0),c0],fn,jac);
+  sig=Math.abs(sig);
+  const yp=x.map(xi=>fn(xi,[A,mu,sig,c]));
+  const r2=calcR2(y,yp);
+
+  // Standardní chyby přes kovariační matici
+  const Jac=x.map(xi=>jac(xi,[A,mu,sig,c]));
+  const m=4, n=x.length;
+  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j)=>s+j[a]*j[b],0)));
+  const s2=yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-m,1);
+  const Cinv=inv4(JtJ);
+  const se=Cinv?Cinv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2))):[0,0,0,0];
+
+  const FWHM=2*Math.sqrt(2*Math.log(2))*sig;
+  const seFWHM=2*Math.sqrt(2*Math.log(2))*se[2];
+
+  return{
+    type:'gaussian', a:A, b:mu, c:sig, d:c,
+    seA:se[0], seB:se[1], seC:se[2], seD:se[3],
+    FWHM, seFWHM, r2, yp,
+    eq:`y = ${f6(A)}·exp(-(x-${f6(mu)})²/(2·${f6(sig)}²)) + ${f6(c)}`,
+    smooth:xi=>fn(xi,[A,mu,sig,c])
+  };
+}
+
 /* ══════════════════════════════════════════════
    TABLE MANAGEMENT
 ══════════════════════════════════════════════ */
@@ -540,6 +644,7 @@ function computeRegression(){
     else if(type==='exponential') result=doExponential(x,y);
     else if(type==='polynomial')  result=doPolynomial(x,y);
     else if(type==='logarithmic') result=doLogarithmic(x,y);
+    else if(type==='gaussian')    result=doGaussian(x,y);
   }catch(err){
     eqEl.innerHTML=`<span class="err">❗ ${err.message}</span>`;
     pmEl.innerHTML='';
@@ -557,10 +662,18 @@ function computeRegression(){
 ══════════════════════════════════════════════ */
 function displayResults(r, used, total){
   document.getElementById('resEq').innerHTML=`📈 ${r.eq}`;
-  let html=`• a = (${f6(r.a)} ± ${f6(r.seA)})<br>`
-          +`• b = (${f6(r.b)} ± ${f6(r.seB)})<br>`;
-  if(r.type==='polynomial')
-    html+=`• c = (${f6(r.c)} ± ${f6(r.seC)})<br>`;
+  let html='';
+  if(r.type==='gaussian'){
+    html+=`• amplituda: A = (${f6(r.a)} ± ${f6(r.seA)})<br>`
+         +`• poloha peaku: μ = (${f6(r.b)} ± ${f6(r.seB)})<br>`
+         +`• sigma: σ = (${f6(r.c)} ± ${f6(r.seC)})<br>`
+         +`• <b>pološířka: FWHM = (${f6(r.FWHM)} ± ${f6(r.seFWHM)})</b><br>`;
+  } else {
+    html+=`• a = (${f6(r.a)} ± ${f6(r.seA)})<br>`
+         +`• b = (${f6(r.b)} ± ${f6(r.seB)})<br>`;
+    if(r.type==='polynomial')
+      html+=`• c = (${f6(r.c)} ± ${f6(r.seC)})<br>`;
+  }
   html+=`• R² = <span class="r2">${r.r2.toFixed(6)}</span><br>`
        +`• Použito bodů: ${used} / ${total}`;
   document.getElementById('resParams').innerHTML=html;
