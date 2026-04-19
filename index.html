@@ -200,6 +200,12 @@ td input.cell:focus{
           <button onclick="saveData()" title="Uložit data jako TXT"
             style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
             onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">💾</button>
+          <button onclick="swapXY()" title="Prohodit x a y"
+            style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
+            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">🔄</button>
+          <button onclick="clearData()" title="Smazat data"
+            style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
+            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">🗑️</button>
         </div>
         <input type="file" id="file-input" accept=".txt,.csv,.tsv,.dat" style="display:none" onchange="loadFile(this)">
       </div>
@@ -224,8 +230,6 @@ td input.cell:focus{
       <div class="btns">
         <button class="btn btn-primary" id="btn-regrese" onclick="toggleRegression()">📊 Regrese</button>
         <button class="btn btn-sec" id="btn-select" onclick="toggleSelectMode()">⬚ Vybrat oblast</button>
-        <button class="btn btn-sec"     onclick="swapXY()">🔄 Prohodit x a y</button>
-        <button class="btn btn-sec"     onclick="clearData()">🗑️ Smazat data</button>
         <button class="btn btn-sec"     onclick="saveGraph()">💾 Uložit graf jako JPG</button>
       </div>
 
@@ -1014,6 +1018,11 @@ function saveGraph(){
   if(!lastResult||!lastData){alert('Nejprve proveďte regresi.');return;}
   const {x,y,excl}=lastData, result=lastResult;
 
+  // Přečti viditelnost datasetů z aktuálního grafu
+  const visibility = chartInst
+    ? chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i))
+    : [];
+
   const tmp=document.createElement('canvas');
   tmp.width=900; tmp.height=600;
   document.body.appendChild(tmp);
@@ -1026,23 +1035,30 @@ function saveGraph(){
   let ySmooth;
   try{ySmooth=xSmooth.map(result.smooth);}catch(e){ySmooth=xSmooth.map(()=>NaN);}
 
-  const ds=[];
-  if(excl.length>0) ds.push({
+  // Sestavuj datasety ve stejném pořadí jako v živém grafu
+  const allDs=[];
+  if(excl.length>0) allDs.push({
     type:'scatter',label:`Vyloučeno (${excl.length})`,
     data:excl.map(p=>({x:p[0],y:p[1]})),
     backgroundColor:'transparent',borderColor:'#2264c0',
     pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:1
   });
-  ds.push({
+  allDs.push({
     type:'scatter',label:'Data',
     data:x.map((xi,i)=>({x:xi,y:y[i]})),
     backgroundColor:'#2264c0',borderColor:'rgba(0,0,0,.25)',
     borderWidth:1.5,pointRadius:6,order:2
   });
-  ds.push({
+  allDs.push({
     type:'line',label:result.eq,
     data:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]})),
     borderColor:'#cc3030',borderWidth:2.5,pointRadius:0,fill:false,tension:0,order:3
+  });
+
+  // Aplikuj viditelnost — skryté datasety nahraď prázdnými daty
+  const ds=allDs.map((d,i)=>{
+    if(visibility.length>i && !visibility[i]) return{...d, data:[], hidden:true};
+    return d;
   });
 
   const ec=new Chart(tmp,{
