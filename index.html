@@ -180,6 +180,8 @@ td input.cell:focus{
       <option value="polynomial">Polynomická 2° (y = ax² + bx + c)</option>
       <option value="logarithmic">Logaritmická (y = a·ln(x) + b)</option>
       <option value="gaussian">Gauss (y = A·e^(-(x-μ)²/2σ²) + c)</option>
+      <option value="gaussian2">2× Gauss (y = A₁·G₁ + A₂·G₂ + c)</option>
+      <option value="gaussian3">3× Gauss (y = A₁·G₁ + A₂·G₂ + A₃·G₃ + c)</option>
     </select>
     <div class="spacer"></div>
     <select class="tbtn" id="themeSelect" onchange="setTheme(this.value)">
@@ -230,6 +232,9 @@ td input.cell:focus{
       <div class="btns">
         <button class="btn btn-primary" id="btn-regrese" onclick="toggleRegression()">📊 Regrese</button>
         <button class="btn btn-sec" id="btn-select" onclick="toggleSelectMode()">⬚ Vybrat oblast</button>
+        <button class="btn btn-sec" id="btn-ci" onclick="toggleCI()">
+          ◌ Interval spolehlivosti 95 %
+        </button>
         <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
           <button class="btn btn-sec" onclick="saveGraph(document.getElementById('save-format').value)"
             style="border:none;border-radius:0;flex:1;border-right:1px solid var(--border);">💾 Uložit graf</button>
@@ -267,6 +272,7 @@ let themeChoice = 'system';
 let lastResult = null;
 let lastData   = null;
 let regressionOn = false;
+let showCI = false;
 let axisLabels = {x:'x', y:'y'};
 let axisLabelsFromFile = false; // true pouze pokud byla detekována hlavička ze souboru
 
@@ -510,6 +516,107 @@ function doGaussian(x,y){
   };
 }
 
+/* ── Multi-Gaussian fit ── */
+function doMultiGaussian(x, y, nPeaks){
+  if(x.length < 5*nPeaks) throw new Error(`Fit ${nPeaks}× Gauss vyžaduje alespoň ${5*nPeaks} bodů.`);
+
+  // Automatický odhad počátečních parametrů — najdi nPeaks lokálních maxim
+  const ymin=Math.min(...y), ymax=Math.max(...y);
+  const c0=ymin;
+
+  // Najdi lokální maxima jako kandidáty peaků
+  const peaks=[];
+  for(let i=1;i<x.length-1;i++){
+    if(y[i]>y[i-1]&&y[i]>y[i+1]) peaks.push({x:x[i],y:y[i],i});
+  }
+  // Seřaď sestupně podle výšky, vezmi top nPeaks
+  peaks.sort((a,b)=>b.y-a.y);
+  const topPeaks=peaks.slice(0,nPeaks);
+  // Pokud nemáme dost lokálních maxim, rovnoměrně rozmístíme
+  while(topPeaks.length<nPeaks){
+    const idx=Math.floor(x.length/(nPeaks+1))*(topPeaks.length+1);
+    topPeaks.push({x:x[Math.min(idx,x.length-1)],y:y[Math.min(idx,x.length-1)]});
+  }
+  topPeaks.sort((a,b)=>a.x-b.x);
+
+  const sigEst=(Math.max(...x)-Math.min(...x))/(nPeaks*3);
+
+  // Počáteční parametry: [A1, mu1, sig1, A2, mu2, sig2, ..., c]
+  const p0=[...topPeaks.flatMap(p=>[Math.max(p.y-c0,1), p.x, sigEst]), c0];
+
+  const fn=(xi,p)=>{
+    let s=p[p.length-1]; // c
+    for(let k=0;k<nPeaks;k++){
+      const A=p[k*3], mu=p[k*3+1], sig=p[k*3+2];
+      s+=A*Math.exp(-((xi-mu)**2)/(2*sig**2));
+    }
+    return s;
+  };
+
+  const jac=(xi,p)=>{
+    const grad=new Array(p.length).fill(0);
+    for(let k=0;k<nPeaks;k++){
+      const A=p[k*3], mu=p[k*3+1], sig=p[k*3+2];
+      const e=Math.exp(-((xi-mu)**2)/(2*sig**2));
+      grad[k*3]  = e;
+      grad[k*3+1]= A*e*(xi-mu)/sig**2;
+      grad[k*3+2]= A*e*(xi-mu)**2/sig**3;
+    }
+    grad[p.length-1]=1; // dc
+    return grad;
+  };
+
+  let pOpt=lmFit(x,y,p0,fn,jac,600,1e-10);
+  // Zajisti kladná sigma
+  for(let k=0;k<nPeaks;k++) pOpt[k*3+2]=Math.abs(pOpt[k*3+2]);
+  // Seřaď peaky podle polohy mu
+  const peakParams=[];
+  for(let k=0;k<nPeaks;k++) peakParams.push([pOpt[k*3],pOpt[k*3+1],pOpt[k*3+2]]);
+  peakParams.sort((a,b)=>a[1]-b[1]);
+  pOpt=[...peakParams.flat(), pOpt[pOpt.length-1]];
+
+  const yp=x.map(xi=>fn(xi,pOpt));
+  const r2=calcR2(y,yp);
+
+  // Standardní chyby — numerický Jacobián pro obecnou velikost
+  const m=p0.length, n=x.length;
+  const Jac=x.map(xi=>jac(xi,pOpt));
+  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j)=>s+j[a]*j[b],0)));
+  const s2=yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-m,1);
+  // Obecná inverze (Gauss-Jordan)
+  const Minv=Array.from({length:m},(_,i)=>Array.from({length:m},(_,j)=>i===j?1:0));
+  const Mcopy=JtJ.map(r=>[...r]);
+  for(let col=0;col<m;col++){
+    let maxRow=col;
+    for(let row=col+1;row<m;row++) if(Math.abs(Mcopy[row][col])>Math.abs(Mcopy[maxRow][col])) maxRow=row;
+    [Mcopy[col],Mcopy[maxRow]]=[Mcopy[maxRow],Mcopy[col]];
+    [Minv[col],Minv[maxRow]]=[Minv[maxRow],Minv[col]];
+    if(Math.abs(Mcopy[col][col])<1e-14) continue;
+    const sc=Mcopy[col][col];
+    for(let k=0;k<m;k++){Mcopy[col][k]/=sc; Minv[col][k]/=sc;}
+    for(let row=0;row<m;row++){
+      if(row===col) continue;
+      const f=Mcopy[row][col];
+      for(let k=0;k<m;k++){Mcopy[row][k]-=f*Mcopy[col][k]; Minv[row][k]-=f*Minv[col][k];}
+    }
+  }
+  const se=Minv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2)));
+
+  const FWHMs=peakParams.map((_,k)=>({
+    FWHM: 2*Math.sqrt(2*Math.log(2))*pOpt[k*3+2],
+    seFWHM: 2*Math.sqrt(2*Math.log(2))*se[k*3+2]
+  }));
+
+  const eqParts=peakParams.map((_,k)=>`${f6(pOpt[k*3])}·G${k+1}`).join(' + ');
+  const muParts=peakParams.map((_,k)=>`μ${k+1}=${f6(pOpt[k*3+1])}`).join(', ');
+
+  return{
+    type:`gaussian${nPeaks}`, nPeaks, params:pOpt, se, FWHMs, r2, yp,
+    eq:`y = ${eqParts} + ${f6(pOpt[pOpt.length-1])}  [${muParts}]`,
+    smooth:xi=>fn(xi,pOpt)
+  };
+}
+
 /* ══════════════════════════════════════════════
    TABLE MANAGEMENT
 ══════════════════════════════════════════════ */
@@ -568,6 +675,23 @@ function getTableData(){
 /* ══════════════════════════════════════════════
    COMPUTE
 ══════════════════════════════════════════════ */
+function toggleCI(){
+  showCI=!showCI;
+  const btn=document.getElementById('btn-ci');
+  if(showCI){
+    btn.textContent='◉ Interval spolehlivosti 95 %';
+    btn.style.background='var(--accent)';
+    btn.style.color='#fff';
+    btn.style.borderColor='var(--accent)';
+  } else {
+    btn.textContent='◌ Interval spolehlivosti 95 %';
+    btn.style.background='';
+    btn.style.color='';
+    btn.style.borderColor='';
+  }
+  if(regressionOn) computeRegression();
+}
+
 function recomputeKeepVis(){
   const vis=chartInst?chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i)):[];
   if(regressionOn) computeRegression(); else showPointsOnly();
@@ -680,6 +804,8 @@ function computeRegression(){
     else if(type==='polynomial')  result=doPolynomial(x,y);
     else if(type==='logarithmic') result=doLogarithmic(x,y);
     else if(type==='gaussian')    result=doGaussian(x,y);
+    else if(type==='gaussian2')   result=doMultiGaussian(x,y,2);
+    else if(type==='gaussian3')   result=doMultiGaussian(x,y,3);
   }catch(err){
     eqEl.innerHTML=`<span class="err">❗ ${err.message}</span>`;
     pmEl.innerHTML='';
@@ -704,6 +830,17 @@ function displayResults(r, used, total){
          +`• σ = (${f6(r.c)} ± ${f6(r.seC)})<br>`
          +`• FWHM = (${f6(r.FWHM)} ± ${f6(r.seFWHM)})<br>`
          +`• c = (${f6(r.d)} ± ${f6(r.seD)})<br>`;
+  } else if(r.type==='gaussian2'||r.type==='gaussian3'){
+    for(let k=0;k<r.nPeaks;k++){
+      const A=r.params[k*3], mu=r.params[k*3+1], sig=r.params[k*3+2];
+      const seA=r.se[k*3], seMu=r.se[k*3+1], seSig=r.se[k*3+2];
+      html+=`<b>Peak ${k+1}:</b><br>`
+           +`• A${k+1} = (${f6(A)} ± ${f6(seA)})<br>`
+           +`• μ${k+1} = (${f6(mu)} ± ${f6(seMu)})<br>`
+           +`• σ${k+1} = (${f6(sig)} ± ${f6(seSig)})<br>`
+           +`• FWHM${k+1} = (${f6(r.FWHMs[k].FWHM)} ± ${f6(r.FWHMs[k].seFWHM)})<br>`;
+    }
+    html+=`• c = (${f6(r.params[r.params.length-1])} ± ${f6(r.se[r.se.length-1])})<br>`;
   } else {
     html+=`• a = (${f6(r.a)} ± ${f6(r.seA)})<br>`
          +`• b = (${f6(r.b)} ± ${f6(r.seB)})<br>`;
@@ -743,6 +880,29 @@ function updateChart(result, x, y, excl){
   try{ ySmooth=xSmooth.map(result.smooth); }
   catch(e){ ySmooth=xSmooth.map(()=>NaN); }
 
+  // Výpočet intervalu spolehlivosti
+  let ciUpper=null, ciLower=null;
+  if(showCI && result.yp){
+    const n=x.length;
+    const p = result.type==='polynomial'?3 : result.type==='gaussian'?4 :
+              result.type==='gaussian2'?7 : result.type==='gaussian3'?10 : 2;
+    const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
+    // t kritická hodnota 95% — aproximace pro velká n → 1.96, pro malá přesnější
+    const tCrit = n>30 ? 1.96 : n>10 ? 2.228 : 2.776;
+
+    if(result.type==='linear'){
+      // Přesný vzorec pro lineární regresi
+      const xMean=x.reduce((s,v)=>s+v,0)/n;
+      const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
+      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
+      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
+    } else {
+      // Přibližný uniformní pás pro nelineární regrese
+      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse}));
+      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse}));
+    }
+  }
+
   const c=chartColors();
   const datasets=[];
 
@@ -769,6 +929,25 @@ function updateChart(result, x, y, excl){
     pointRadius:0,fill:false,tension:0,order:3
   });
 
+  if(ciUpper&&ciLower){
+    datasets.push({
+      type:'line',label:'IS 95 %',
+      data:ciUpper,
+      borderColor:'rgba(255,107,107,0.4)',
+      backgroundColor:'rgba(255,107,107,0.18)',
+      borderWidth:1,borderDash:[4,3],
+      pointRadius:0,fill:'+1',tension:0,order:4
+    });
+    datasets.push({
+      type:'line',label:'_ciLower',
+      data:ciLower,
+      borderColor:'rgba(255,107,107,0.4)',
+      backgroundColor:'rgba(255,107,107,0.18)',
+      borderWidth:1,borderDash:[4,3],
+      pointRadius:0,fill:false,tension:0,order:5
+    });
+  }
+
   const ctx=document.getElementById('myChart').getContext('2d');
   chartInst=new Chart(ctx,{
     type:'scatter',
@@ -791,7 +970,25 @@ function updateChart(result, x, y, excl){
       plugins:{
         legend:{
           labels:{color:c.tick,usePointStyle:true,
-                  font:{family:'Sora',size:11},boxWidth:10,padding:14}
+                  font:{family:'Sora',size:11},boxWidth:10,padding:14,
+                  filter:item=>item.text!=='_ciLower'},
+          onClick(e, legendItem, legend){
+            const chart=legend.chart;
+            const idx=legendItem.datasetIndex;
+            const label=chart.data.datasets[idx]?.label;
+            // Pokud klikneme na CI, schováme/zobrazíme oba CI datasety
+            if(label==='IS 95 %'){
+              const ciIdx=chart.data.datasets.findIndex(d=>d.label==='IS 95 %');
+              const ciLowIdx=chart.data.datasets.findIndex(d=>d.label==='_ciLower');
+              const vis=chart.isDatasetVisible(ciIdx);
+              if(vis){ chart.hide(ciIdx); if(ciLowIdx>=0) chart.hide(ciLowIdx); }
+              else   { chart.show(ciIdx); if(ciLowIdx>=0) chart.show(ciLowIdx); }
+            } else {
+              // Standardní chování pro ostatní datasety
+              if(chart.isDatasetVisible(idx)) chart.hide(idx);
+              else chart.show(idx);
+            }
+          }
         },
         tooltip:{
           callbacks:{
@@ -1086,6 +1283,35 @@ function saveGraph(fmt){
     borderColor:'#cc3030',borderWidth:2.5,pointRadius:0,fill:false,tension:0,order:3
   });
 
+  // CI pás — stejný výpočet jako v updateChart
+  if(showCI && result.yp){
+    const n=x.length;
+    const p = result.type==='polynomial'?3 : result.type==='gaussian'?4 :
+              result.type==='gaussian2'?7 : result.type==='gaussian3'?10 : 2;
+    const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
+    const tCrit = n>30 ? 1.96 : n>10 ? 2.228 : 2.776;
+    let ciUpper, ciLower;
+    if(result.type==='linear'){
+      const xMean=x.reduce((s,v)=>s+v,0)/n;
+      const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
+      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
+      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
+    } else {
+      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse}));
+      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse}));
+    }
+    allDs.push({
+      type:'line',label:'IS 95 %',data:ciUpper,
+      borderColor:'rgba(200,50,50,0.4)',backgroundColor:'rgba(200,50,50,0.12)',
+      borderWidth:1,borderDash:[4,3],pointRadius:0,fill:'+1',tension:0,order:4
+    });
+    allDs.push({
+      type:'line',label:'_ciLower',data:ciLower,
+      borderColor:'rgba(200,50,50,0.4)',backgroundColor:'rgba(200,50,50,0.12)',
+      borderWidth:1,borderDash:[4,3],pointRadius:0,fill:false,tension:0,order:5
+    });
+  }
+
   // Aplikuj viditelnost — skryté datasety nahraď prázdnými daty
   const ds=allDs.map((d,i)=>{
     if(visibility.length>i && !visibility[i]) return{...d, data:[], hidden:true};
@@ -1163,6 +1389,26 @@ function saveGraphSVG(){
   datasets.push({type:'data',pts:x.map((xi,i)=>[xi,y[i]])});
   datasets.push({type:'line',pts:xSmooth.map((xi,i)=>[xi,ySmooth[i]])});
 
+  // CI pro SVG
+  let ciSVG=null;
+  if(showCI && result.yp){
+    const n=x.length;
+    const p=result.type==='polynomial'?3:result.type==='gaussian'?4:result.type==='gaussian2'?7:result.type==='gaussian3'?10:2;
+    const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
+    const tCrit=n>30?1.96:n>10?2.228:2.776;
+    let upper,lower;
+    if(result.type==='linear'){
+      const xMean=x.reduce((s,v)=>s+v,0)/n;
+      const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
+      upper=xSmooth.map((xi,i)=>[xi,ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)]);
+      lower=xSmooth.map((xi,i)=>[xi,ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)]);
+    } else {
+      upper=xSmooth.map((xi,i)=>[xi,ySmooth[i]+tCrit*rmse]);
+      lower=xSmooth.map((xi,i)=>[xi,ySmooth[i]-tCrit*rmse]);
+    }
+    ciSVG={upper,lower};
+  }
+
   let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" font-family="'Sora',sans-serif">`;
   svg+=`<rect width="${W}" height="${H}" fill="#ffffff"/>`;
   svg+=`<rect x="${ml}" y="${mt}" width="${pw}" height="${ph}" fill="#fafafa"/>`;
@@ -1189,6 +1435,22 @@ function saveGraphSVG(){
   svg+=`<text x="14" y="${mt+ph/2}" text-anchor="middle" font-size="12" fill="#444456" transform="rotate(-90,14,${mt+ph/2})">${axisLabels.y}</text>`;
 
   // Datasets
+  // Nejdřív CI pás (pod křivkou)
+  if(ciSVG){
+    const uPts=ciSVG.upper.filter(p=>isFinite(p[1]));
+    const lPts=ciSVG.lower.filter(p=>isFinite(p[1])).reverse();
+    const polyPts=[...uPts,...lPts];
+    if(polyPts.length>2){
+      const poly=polyPts.map(p=>`${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
+      svg+=`<polygon points="${poly}" fill="rgba(200,50,50,0.12)"/>`;
+      // Hranice přerušovanou čarou
+      const du=uPts.map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
+      const dl=ciSVG.lower.filter(p=>isFinite(p[1])).map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
+      svg+=`<path d="${du}" fill="none" stroke="rgba(200,50,50,0.4)" stroke-width="1" stroke-dasharray="4,3"/>`;
+      svg+=`<path d="${dl}" fill="none" stroke="rgba(200,50,50,0.4)" stroke-width="1" stroke-dasharray="4,3"/>`;
+    }
+  }
+
   datasets.forEach((ds,i)=>{
     if(visibility.length>i && !visibility[i]) return;
     if(ds.type==='line'){
