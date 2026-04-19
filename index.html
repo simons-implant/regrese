@@ -67,7 +67,42 @@ select#rType:focus{border-color:var(--accent);}
 
 .main{display:flex;gap:14px;flex:1;min-height:0;}
 
-.left{display:flex;flex-direction:column;gap:8px;width:305px;flex-shrink:0;}
+.left{display:flex;flex-direction:column;gap:8px;width:260px;flex-shrink:0;}
+
+.right{
+  flex:1;background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:14px;
+  display:flex;align-items:stretch;justify-content:center;
+  min-width:0;box-shadow:var(--shadow);
+}
+.chart-area{
+  flex:1;min-width:0;
+  display:flex;flex-direction:column;gap:8px;
+}
+.chart-box{
+  flex:1;background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:14px;
+  display:flex;align-items:stretch;justify-content:center;
+  min-height:0;box-shadow:var(--shadow);
+}
+.eq-bar{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:9px 14px;
+  font-family:'Fira Code',monospace;font-size:13px;
+  font-weight:600;color:var(--accent);
+  box-shadow:var(--shadow);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;
+}
+.side-panel{
+  display:flex;flex-direction:column;gap:8px;
+  width:280px;flex-shrink:0;
+}
+.results-panel{
+  flex:1;background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:11px 13px;font-size:13px;
+  box-shadow:var(--shadow);display:flex;flex-direction:column;
+  min-height:0;overflow-y:auto;
+}
 
 .sec-label{
   font-size:11px;font-weight:600;color:var(--text-muted);
@@ -123,28 +158,17 @@ td input.cell:focus{
 .btn-sec{background:var(--btn);color:var(--text);}
 .btn-sec:hover{background:var(--btn-h);}
 
-.results{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:10px;padding:11px 13px;font-size:13px;
-  box-shadow:var(--shadow);
-}
+.r2{color:var(--success);font-weight:600;}
+.err{color:var(--danger);}
 .res-eq{
   font-weight:600;font-size:13.5px;color:var(--accent);
   margin-bottom:7px;word-break:break-all;
 }
 .res-params{
   font-family:'Fira Code',monospace;font-size:11.5px;
-  color:var(--text);line-height:1.85;
+  color:var(--text);line-height:1.85;flex:1;
 }
-.r2{color:var(--success);font-weight:600;}
-.err{color:var(--danger);}
 
-.right{
-  flex:1;background:var(--surface);border:1px solid var(--border);
-  border-radius:12px;padding:14px;
-  display:flex;align-items:stretch;justify-content:center;
-  min-width:0;box-shadow:var(--shadow);
-}
 .chart-wrap{width:100%;height:100%;position:relative;}
 .sel-overlay{
   position:absolute;inset:0;z-index:10;
@@ -162,11 +186,11 @@ td input.cell:focus{
 .tbl-wrap::-webkit-scrollbar-track{background:transparent;}
 .tbl-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
 
-@media(max-width:760px){
+@media(max-width:900px){
   .app{height:auto;}
   .main{flex-direction:column;}
-  .left{width:100%;}
-  .right{min-height:320px;}
+  .left,.side-panel{width:100%;}
+  .chart-area{min-height:320px;}
 }
 </style>
 </head>
@@ -174,15 +198,6 @@ td input.cell:focus{
 <div class="app">
   <header class="topbar">
     <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v1.0</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span></div></div>
-    <select id="rType" onchange="recomputeKeepVis()">
-      <option value="linear">Lineární (y = ax + b)</option>
-      <option value="exponential">Exponenciální (y = a·e^(bx))</option>
-      <option value="polynomial">Polynomická 2° (y = ax² + bx + c)</option>
-      <option value="logarithmic">Logaritmická (y = a·ln(x) + b)</option>
-      <option value="gaussian">Gauss (y = A·e^(-(x-μ)²/2σ²) + c)</option>
-      <option value="gaussian2">2× Gauss (y = A₁·G₁ + A₂·G₂ + c)</option>
-      <option value="gaussian3">3× Gauss (y = A₁·G₁ + A₂·G₂ + A₃·G₃ + c)</option>
-    </select>
     <div class="spacer"></div>
     <select class="tbtn" id="themeSelect" onchange="setTheme(this.value)">
       <option value="system">🖥️ Systém</option>
@@ -193,22 +208,20 @@ td input.cell:focus{
 
   <div class="main">
     <div class="left">
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <div class="sec-label" style="margin-bottom:0;">Zadejte data (x, y):</div>
-        <div style="display:flex;gap:4px;">
-          <button onclick="document.getElementById('file-input').click()" title="Načíst soubor"
-            style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
-            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">📂</button>
-          <button onclick="saveData()" title="Uložit data jako TXT"
-            style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
-            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">💾</button>
-          <button onclick="swapXY()" title="Prohodit x a y"
-            style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
-            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">🔄</button>
-          <button onclick="clearData()" title="Smazat data"
-            style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
-            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">🗑️</button>
-        </div>
+      <div class="sec-label" style="white-space:nowrap;">Zadejte data (x, y):</div>
+      <div style="display:flex;gap:4px;">
+        <button onclick="document.getElementById('file-input').click()" title="Načíst soubor"
+          style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">📂</button>
+        <button onclick="saveData()" title="Uložit data jako TXT"
+          style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">💾</button>
+        <button onclick="swapXY()" title="Prohodit x a y"
+          style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">🔄</button>
+        <button onclick="clearData()" title="Smazat data"
+          style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">🗑️</button>
         <input type="file" id="file-input" accept=".txt,.csv,.tsv,.dat" style="display:none" onchange="loadFile(this)">
       </div>
       <div style="display:grid;grid-template-columns:32px 46px 1fr 1fr;gap:4px;padding:0 1px;">
@@ -228,36 +241,61 @@ td input.cell:focus{
           <tbody id="tbody"></tbody>
         </table>
       </div>
+    </div>
 
+    <div class="chart-area">
+      <div class="chart-box">
+        <div class="chart-wrap">
+          <canvas id="myChart"></canvas>
+          <div class="sel-overlay" id="sel-overlay"></div>
+        </div>
+      </div>
+      <div class="eq-bar">
+        <div id="eq-general" style="color:var(--text-muted);font-size:12px;"></div>
+        <div id="resEq" style="margin-top:2px;">—</div>
+      </div>
+    </div>
+
+    <div class="side-panel">
+      <div style="position:relative;width:100%;">
+        <select id="rType" onchange="updateGeneralEq(); recomputeKeepVis()"
+          style="background:var(--btn);color:var(--text);border:1px solid var(--border);
+                 border-radius:8px;padding:6px 10px;font-family:'Sora',sans-serif;
+                 font-size:13px;cursor:pointer;outline:none;width:100%;
+                 box-sizing:border-box;">
+          <option value="linear">Lineární (y = ax + b)</option>
+          <option value="exponential">Exponenciální (y = a·e^(bx))</option>
+          <option value="polynomial">Polynomická 2° (y = ax² + bx + c)</option>
+          <option value="logarithmic">Logaritmická (y = a·ln(x) + b)</option>
+          <option value="gaussian">Gauss (y = A·e^(-(x-μ)²/2σ²) + c)</option>
+          <option value="gaussian2">2× Gauss (y = A₁·G₁ + A₂·G₂ + c)</option>
+          <option value="gaussian3">3× Gauss (y = A₁·G₁ + A₂·G₂ + A₃·G₃ + c)</option>
+        </select>
+      </div>
       <div class="btns">
         <button class="btn btn-primary" id="btn-regrese" onclick="toggleRegression()">📊 Regrese</button>
         <button class="btn btn-sec" id="btn-select" onclick="toggleSelectMode()">⬚ Vybrat oblast</button>
         <button class="btn btn-sec" id="btn-ci" onclick="toggleCI()">
           ◌ Interval spolehlivosti 95 %
         </button>
-        <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
-          <button class="btn btn-sec" onclick="saveGraph(document.getElementById('save-format').value)"
-            style="border:none;border-radius:0;flex:1;border-right:1px solid var(--border);">💾 Uložit graf</button>
-          <select id="save-format" style="background:var(--btn);color:var(--text);border:none;
-            padding:0 8px;font-family:'Sora',sans-serif;font-size:12px;cursor:pointer;outline:none;">
-            <option value="jpg">JPG</option>
-            <option value="png">PNG</option>
-            <option value="svg">SVG</option>
-          </select>
-        </div>
       </div>
 
-      <div class="results">
-        <div class="res-eq"     id="resEq">—</div>
+      <div class="results-panel">
+        <div class="sec-label" style="margin-bottom:8px;">Regresní parametry:</div>
         <div class="res-params" id="resParams"></div>
       </div>
-    </div>
 
-    <div class="right">
-      <div class="chart-wrap">
-        <canvas id="myChart"></canvas>
-        <div class="sel-overlay" id="sel-overlay"></div>
+      <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0;margin-top:auto;">
+        <button class="btn btn-sec" onclick="saveGraph(document.getElementById('save-format').value)"
+          style="border:none;border-radius:0;flex:1;border-right:1px solid var(--border);">💾 Uložit graf</button>
+        <select id="save-format" style="background:var(--btn);color:var(--text);border:none;
+          padding:0 8px;font-family:'Sora',sans-serif;font-size:12px;cursor:pointer;outline:none;">
+          <option value="jpg">JPG</option>
+          <option value="png">PNG</option>
+          <option value="svg">SVG</option>
+        </select>
       </div>
+    </div>
     </div>
   </div>
 </div>
@@ -607,12 +645,12 @@ function doMultiGaussian(x, y, nPeaks){
     seFWHM: 2*Math.sqrt(2*Math.log(2))*se[k*3+2]
   }));
 
-  const eqParts=peakParams.map((_,k)=>`${f6(pOpt[k*3])}·G${k+1}`).join(' + ');
-  const muParts=peakParams.map((_,k)=>`μ${k+1}=${f6(pOpt[k*3+1])}`).join(', ');
+  const eqParts=peakParams.map((_,k)=>`${f6(pOpt[k*3])}·e^(-(x-${f6(pOpt[k*3+1])})²/(2·${f6(pOpt[k*3+2])}²))`).join(' + ');
 
   return{
     type:`gaussian${nPeaks}`, nPeaks, params:pOpt, se, FWHMs, r2, yp,
-    eq:`y = ${eqParts} + ${f6(pOpt[pOpt.length-1])}  [${muParts}]`,
+    eq:`y = ${eqParts} + ${f6(pOpt[pOpt.length-1])}`,
+    eqShort:'fit',
     smooth:xi=>fn(xi,pOpt)
   };
 }
@@ -689,7 +727,22 @@ function toggleCI(){
     btn.style.color='';
     btn.style.borderColor='';
   }
-  if(regressionOn) computeRegression();
+  recomputeKeepVis();
+}
+
+function updateGeneralEq(){
+  const general={
+    linear:'y = ax + b',
+    exponential:'y = a·e^(bx)',
+    polynomial:'y = ax² + bx + c',
+    logarithmic:'y = a·ln(x) + b',
+    gaussian:'y = A·e^(-(x-μ)²/2σ²) + c',
+    gaussian2:'y = A₁·e^(-(x-μ₁)²/2σ₁²) + A₂·e^(-(x-μ₂)²/2σ₂²) + c',
+    gaussian3:'y = A₁·e^(-(x-μ₁)²/2σ₁²) + A₂·e^(-(x-μ₂)²/2σ₂²) + A₃·e^(-(x-μ₃)²/2σ₃²) + c'
+  };
+  const type=document.getElementById('rType').value;
+  const el=document.getElementById('eq-general');
+  if(el) el.textContent=general[type]||'';
 }
 
 function recomputeKeepVis(){
@@ -732,14 +785,18 @@ function updateMasterCheckbox(){
 function toggleRegression(){
   if(!regressionOn){
     regressionOn=true;
-    computeRegression();
+    recomputeKeepVis();
   } else {
     regressionOn=false;
     document.getElementById('btn-regrese').textContent='📊 Regrese';
-    document.getElementById('resEq').textContent='—';
+    document.getElementById('resEq').textContent='—'; document.getElementById('eq-general').style.display='';
     document.getElementById('resParams').textContent='';
     lastResult=null;
+    // Zachovej viditelnost bodů
+    const vis=chartInst?chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i)):[];
     showPointsOnly();
+    if(chartInst) vis.forEach((v,i)=>{ if(!v) chartInst.hide(i); });
+    if(chartInst) chartInst.update();
   }
 }
 
@@ -822,7 +879,10 @@ function computeRegression(){
    DISPLAY RESULTS
 ══════════════════════════════════════════════ */
 function displayResults(r, used, total){
-  document.getElementById('resEq').innerHTML=`📈 ${r.eq}`;
+  document.getElementById('resEq').textContent=r.eq;
+  // Zobraz obecný předpis šedě nad fitovaným
+  const elGen=document.getElementById('eq-general');
+  if(elGen) elGen.style.display='';
   let html='';
   if(r.type==='gaussian'){
     html+=`• A = (${f6(r.a)} ± ${f6(r.seA)})<br>`
@@ -874,8 +934,8 @@ function updateChart(result, x, y, excl){
   if(chartInst){chartInst.destroy();chartInst=null;}
 
   const xMin=Math.min(...x), xMax=Math.max(...x);
-  const step=(xMax-xMin)/119||1;
-  const xSmooth=Array.from({length:120},(_,i)=>xMin+i*step);
+  const step=(xMax-xMin)/399||1;
+  const xSmooth=Array.from({length:400},(_,i)=>xMin+i*step);
   let ySmooth;
   try{ ySmooth=xSmooth.map(result.smooth); }
   catch(e){ ySmooth=xSmooth.map(()=>NaN); }
@@ -923,7 +983,7 @@ function updateChart(result, x, y, excl){
   });
 
   datasets.push({
-    type:'line',label:result.eq,
+    type:'line',label:result.eqShort||result.eq,
     data:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]})),
     borderColor:'#ff6b6b',borderWidth:2.5,
     pointRadius:0,fill:false,tension:0,order:3
@@ -1066,7 +1126,7 @@ function parseAndFill(text){
   tb.innerHTML='';
   regressionOn=false;
   document.getElementById('btn-regrese').textContent='📊 Regrese';
-  document.getElementById('resEq').textContent='—';
+  document.getElementById('resEq').textContent='—'; document.getElementById('eq-general').style.display='';
   document.getElementById('resParams').textContent='';
 
   rows.forEach(([xv,yv],i)=>{
@@ -1105,7 +1165,7 @@ function toggleSelectMode(){
     const tb=document.getElementById('tbody');
     tb.querySelectorAll('input[type="checkbox"]').forEach(cb=>cb.checked=false);
     updateMasterCheckbox();
-    if(regressionOn) computeRegression(); else showPointsOnly();
+    recomputeKeepVis();
   } else {
     exitSelectMode();
   }
@@ -1174,7 +1234,7 @@ document.addEventListener('DOMContentLoaded',()=>{
     selRect.remove(); selRect=null; selStart=null;
     exitSelectMode();
     updateMasterCheckbox();
-    if(regressionOn) computeRegression(); else showPointsOnly();
+    recomputeKeepVis();
   });
 });
 
@@ -1214,8 +1274,7 @@ function swapXY(){
   const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
   if(lx) lx.value=axisLabels.x;
   if(ly) ly.value=axisLabels.y;
-  if(regressionOn) computeRegression();
-  else showPointsOnly();
+  recomputeKeepVis();
 }
 
 function clearData(){
@@ -1230,7 +1289,7 @@ function clearData(){
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
   for(let i=0;i<6;i++) addRow();
-  document.getElementById('resEq').textContent='—';
+  document.getElementById('resEq').textContent='—'; document.getElementById('eq-general').style.display='';
   document.getElementById('resParams').textContent='';
   clearChart();
 }
@@ -1259,8 +1318,8 @@ function saveGraph(fmt){
   const lc={bg:'#fafafa',grid:'rgba(0,0,0,.07)',tick:'#33334a',axis:'#cccccc'};
 
   const xMin=Math.min(...x),xMax=Math.max(...x);
-  const step=(xMax-xMin)/119||1;
-  const xSmooth=Array.from({length:120},(_,i)=>xMin+i*step);
+  const step=(xMax-xMin)/399||1;
+  const xSmooth=Array.from({length:400},(_,i)=>xMin+i*step);
   let ySmooth;
   try{ySmooth=xSmooth.map(result.smooth);}catch(e){ySmooth=xSmooth.map(()=>NaN);}
 
@@ -1279,7 +1338,7 @@ function saveGraph(fmt){
     borderWidth:1.5,pointRadius:6,order:2
   });
   allDs.push({
-    type:'line',label:result.eq,
+    type:'line',label:'fit',
     data:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]})),
     borderColor:'#cc3030',borderWidth:2.5,pointRadius:0,fill:false,tension:0,order:3
   });
@@ -1314,11 +1373,8 @@ function saveGraph(fmt){
     });
   }
 
-  // Aplikuj viditelnost — skryté datasety nahraď prázdnými daty
-  const ds=allDs.map((d,i)=>{
-    if(visibility.length>i && !visibility[i]) return{...d, data:[], hidden:true};
-    return d;
-  });
+  // Aplikuj viditelnost — skryté datasety úplně vynech
+  const ds=allDs.filter((d,i)=>!(visibility.length>i && !visibility[i]));
 
   const ec=new Chart(tmp,{
     type:'scatter',data:{datasets:ds},
@@ -1377,8 +1433,8 @@ function saveGraphSVG(){
   const yMin=chartInst.scales.y.min, yMax=chartInst.scales.y.max;
   // Křivka jen přes zahrnuté body
   const xSmoothMin=Math.min(...x), xSmoothMax=Math.max(...x);
-  const step=(xSmoothMax-xSmoothMin)/119||1;
-  const xSmooth=Array.from({length:120},(_,i)=>xSmoothMin+i*step);
+  const step=(xSmoothMax-xSmoothMin)/399||1;
+  const xSmooth=Array.from({length:400},(_,i)=>xSmoothMin+i*step);
   let ySmooth;
   try{ySmooth=xSmooth.map(result.smooth);}catch(e){ySmooth=xSmooth.map(()=>NaN);}
   const yRange=yMax-yMin||1, xRange=xMax-xMin||1;
@@ -1486,7 +1542,7 @@ function saveGraphSVG(){
       if(ds.label==='IS 95 %'){
         legendItems.push({label:'IS 95 %', ci:true});
       } else if(ds.type==='line'){
-        legendItems.push({label:ds.label, color:'#cc3030', line:true});
+        legendItems.push({label:'fit', color:'#cc3030', line:true});
       } else if(ds.backgroundColor==='transparent'||ds.backgroundColor==='rgba(255,80,80,.5)'){
         legendItems.push({label:ds.label, color:'#2264c0', hollow:true});
       } else {
@@ -1495,20 +1551,36 @@ function saveGraphSVG(){
     });
   }
 
-  let lx=ml+10;
-  legendItems.forEach(item=>{
+  // Vypočítej celkovou šířku legendy a případně rozlož na dva řádky
+  const itemW=item=>item.label.length*6.5+40;
+  const totalW=legendItems.reduce((s,it)=>s+itemW(it),0);
+
+  // Pokud se vše vejde na jeden řádek, klasicky zleva; jinak IS 95 % vpravo
+  const ciItem=legendItems.find(it=>it.ci);
+  const mainItems=legendItems.filter(it=>!it.ci);
+
+  const drawLegendItem=(item,lx,ly)=>{
     if(item.ci){
-      svg+=`<rect x="${lx}" y="${mt+5}" width="20" height="10" fill="rgba(200,50,50,0.12)" stroke="rgba(200,50,50,0.4)" stroke-width="1" stroke-dasharray="4,2"/>`;
+      svg+=`<rect x="${lx}" y="${ly-5}" width="20" height="10" fill="rgba(200,50,50,0.12)" stroke="rgba(200,50,50,0.4)" stroke-width="1" stroke-dasharray="4,2"/>`;
     } else if(item.line){
-      svg+=`<line x1="${lx}" y1="${mt+10}" x2="${lx+20}" y2="${mt+10}" stroke="${item.color}" stroke-width="2.5"/>`;
+      svg+=`<line x1="${lx}" y1="${ly}" x2="${lx+20}" y2="${ly}" stroke="${item.color}" stroke-width="2.5"/>`;
     } else if(item.hollow){
-      svg+=`<circle cx="${lx+7}" cy="${mt+10}" r="5" fill="none" stroke="${item.color}" stroke-width="2"/>`;
+      svg+=`<circle cx="${lx+7}" cy="${ly}" r="5" fill="none" stroke="${item.color}" stroke-width="2"/>`;
     } else {
-      svg+=`<circle cx="${lx+7}" cy="${mt+10}" r="5" fill="${item.color}"/>`;
+      svg+=`<circle cx="${lx+7}" cy="${ly}" r="5" fill="${item.color}"/>`;
     }
-    svg+=`<text x="${lx+24}" y="${mt+14}" font-size="11" fill="#444456">${item.label}</text>`;
-    lx+=item.label.length*6.5+40;
-  });
+    svg+=`<text x="${lx+24}" y="${ly+4}" font-size="11" fill="#444456">${item.label}</text>`;
+  };
+
+  // Hlavní položky zleva
+  let lx=ml+10;
+  mainItems.forEach(item=>{ drawLegendItem(item,lx,mt+10); lx+=itemW(item); });
+
+  // IS 95 % vpravo (pokud existuje)
+  if(ciItem){
+    const ciW=itemW(ciItem);
+    drawLegendItem(ciItem, ml+pw-ciW+4, mt+10);
+  }
 
   svg+=`</svg>`;
 
@@ -1523,6 +1595,7 @@ function saveGraphSVG(){
 ══════════════════════════════════════════════ */
 applyTheme(false);
 initTable();
+updateGeneralEq();
 </script>
 </body>
 </html>
