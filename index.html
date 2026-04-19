@@ -285,16 +285,7 @@ td input.cell:focus{
         <div class="res-params" id="resParams"></div>
       </div>
 
-      <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0;margin-top:auto;">
-        <button class="btn btn-sec" onclick="saveGraph(document.getElementById('save-format').value)"
-          style="border:none;border-radius:0;flex:1;border-right:1px solid var(--border);">💾 Uložit graf</button>
-        <select id="save-format" style="background:var(--btn);color:var(--text);border:none;
-          padding:0 8px;font-family:'Sora',sans-serif;font-size:12px;cursor:pointer;outline:none;">
-          <option value="jpg">JPG</option>
-          <option value="png">PNG</option>
-          <option value="svg">SVG</option>
-        </select>
-      </div>
+      <button class="btn btn-sec" onclick="saveGraph()" style="flex-shrink:0;margin-top:auto;">💾 Uložit graf (PNG)</button>
     </div>
     </div>
   </div>
@@ -1294,15 +1285,7 @@ function clearData(){
   clearChart();
 }
 
-function saveGraph(fmt){
-  const format = fmt || document.getElementById('save-format')?.value || 'jpg';
-  if(!lastResult||!lastData){alert('Nejprve proveďte regresi.');return;}
-
-  if(format==='svg'){
-    saveGraphSVG();
-    return;
-  }
-
+function saveGraph(){
   if(!lastResult||!lastData){alert('Nejprve proveďte regresi.');return;}
   const {x,y,excl}=lastData, result=lastResult;
 
@@ -1311,8 +1294,9 @@ function saveGraph(fmt){
     ? chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i))
     : [];
 
+  // 2× rozlišení pro ostrost
   const tmp=document.createElement('canvas');
-  tmp.width=900; tmp.height=600;
+  tmp.width=2700; tmp.height=1800;
   document.body.appendChild(tmp);
 
   const lc={bg:'#fafafa',grid:'rgba(0,0,0,.07)',tick:'#33334a',axis:'#cccccc'};
@@ -1329,18 +1313,18 @@ function saveGraph(fmt){
     type:'scatter',label:`Vyloučeno (${excl.length})`,
     data:excl.map(p=>({x:p[0],y:p[1]})),
     backgroundColor:'transparent',borderColor:'#2264c0',
-    pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:1
+    pointStyle:'circle',pointRadius:18,pointBorderWidth:4,order:1
   });
   allDs.push({
     type:'scatter',label:'Data',
     data:x.map((xi,i)=>({x:xi,y:y[i]})),
     backgroundColor:'#2264c0',borderColor:'rgba(0,0,0,.25)',
-    borderWidth:1.5,pointRadius:6,order:2
+    borderWidth:4,pointRadius:18,order:2
   });
   allDs.push({
     type:'line',label:'fit',
     data:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]})),
-    borderColor:'#cc3030',borderWidth:2.5,pointRadius:0,fill:false,tension:0,order:3
+    borderColor:'#cc3030',borderWidth:7,pointRadius:0,fill:false,tension:0,order:3
   });
 
   // CI pás — stejný výpočet jako v updateChart
@@ -1382,17 +1366,17 @@ function saveGraph(fmt){
       responsive:false,animation:false,
       scales:{
         x:{type:'linear',grid:{color:lc.grid},
-           ticks:{color:lc.tick,font:{family:'Fira Code',size:11}},
+           ticks:{color:lc.tick,font:{family:'Fira Code',size:33}},
            border:{color:lc.axis},
-           title:{display:true,text:axisLabels.x,color:lc.tick,font:{family:'Sora',size:12}}},
+           title:{display:true,text:axisLabels.x,color:lc.tick,font:{family:'Sora',size:36}}},
         y:{type:'linear',grid:{color:lc.grid},
-           ticks:{color:lc.tick,font:{family:'Fira Code',size:11}},
+           ticks:{color:lc.tick,font:{family:'Fira Code',size:33}},
            border:{color:lc.axis},
-           title:{display:true,text:axisLabels.y,color:lc.tick,font:{family:'Sora',size:12}}}
+           title:{display:true,text:axisLabels.y,color:lc.tick,font:{family:'Sora',size:36}}}
       },
       plugins:{
         legend:{labels:{color:lc.tick,usePointStyle:true,
-                        font:{family:'Sora',size:11},boxWidth:10,padding:14,
+                        font:{family:'Sora',size:33},boxWidth:30,padding:42,
                         filter:item=>item.text!=='_ciLower'}},
         tooltip:{enabled:false}
       }
@@ -1408,8 +1392,8 @@ function saveGraph(fmt){
 
   setTimeout(()=>{
     const a=document.createElement('a');
-    a.href=format==='png'?tmp.toDataURL('image/png'):tmp.toDataURL('image/jpeg',0.96);
-    a.download=format==='png'?'regrese.png':'regrese.jpg';
+    a.href=tmp.toDataURL('image/png');
+    a.download='regrese.png';
     a.click();
     ec.destroy();
     document.body.removeChild(tmp);
