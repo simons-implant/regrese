@@ -97,6 +97,39 @@ select#rType:focus{border-color:var(--accent);}
   display:flex;flex-direction:column;gap:8px;
   width:280px;flex-shrink:0;
 }
+
+.icon-bar{
+  display:flex;gap:6px;
+}
+.icon-btn{
+  flex:1;background:var(--btn);color:var(--text);
+  border:1px solid var(--border);border-radius:8px;
+  padding:8px 0;font-size:18px;cursor:pointer;
+  transition:background .15s,border-color .15s;outline:none;
+  position:relative;text-align:center;line-height:1;
+}
+.icon-btn:hover{background:var(--btn-h);}
+.icon-btn.active{border-color:var(--accent);color:var(--accent);background:var(--btn-h);}
+.icon-btn .icon-label{
+  display:block;font-size:9px;font-family:'Sora',sans-serif;
+  color:var(--text-muted);margin-top:3px;letter-spacing:.03em;
+}
+
+.rtype-dropdown{
+  display:none;position:absolute;top:calc(100% + 6px);left:0;right:0;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;box-shadow:var(--shadow-lg);z-index:200;
+  overflow:hidden;min-width:240px;
+}
+.rtype-dropdown.open{display:block;}
+.rtype-option{
+  display:block;width:100%;padding:9px 14px;
+  background:transparent;border:none;text-align:left;
+  font-family:'Sora',sans-serif;font-size:13px;color:var(--text);
+  cursor:pointer;transition:background .12s;
+}
+.rtype-option:hover{background:var(--btn-h);}
+.rtype-option.selected{color:var(--accent);font-weight:600;}
 .results-panel{
   flex:1;background:var(--surface);border:1px solid var(--border);
   border-radius:10px;padding:11px 13px;font-size:13px;
@@ -214,7 +247,7 @@ td input.cell:focus{
           style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">📂</button>
         <button onclick="saveData()" title="Uložit data jako TXT"
-          style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
+          style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text)"
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">💾</button>
         <button onclick="swapXY()" title="Prohodit x a y"
           style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
@@ -257,29 +290,56 @@ td input.cell:focus{
     </div>
 
     <div class="side-panel">
-      <div style="position:relative;width:100%;">
-        <select id="rType" onchange="updateGeneralEq(); recomputeKeepVis()"
-          style="background:var(--btn);color:var(--text);border:1px solid var(--border);
-                 border-radius:8px;padding:6px 10px;font-family:'Sora',sans-serif;
-                 font-size:13px;cursor:pointer;outline:none;width:100%;
-                 box-sizing:border-box;">
-          <option value="linear">Lineární (y = ax + b)</option>
-          <option value="exponential">Exponenciální (y = a·e^(bx))</option>
-          <option value="polynomial">Polynomická 2° (y = ax² + bx + c)</option>
-          <option value="logarithmic">Logaritmická (y = a·ln(x) + b)</option>
-          <option value="gaussian">Gauss (y = A·e^(-(x-μ)²/2σ²) + c)</option>
-          <option value="gaussian2">2× Gauss (y = A₁·G₁ + A₂·G₂ + c)</option>
-          <option value="gaussian3">3× Gauss (y = A₁·G₁ + A₂·G₂ + A₃·G₃ + c)</option>
-        </select>
+
+      <div class="sec-label" style="white-space:nowrap;">Nastavení regresní analýzy:</div>
+
+      <!-- Řádek ikon -->
+      <div style="display:flex;gap:4px;">
+
+        <!-- Výběr regrese -->
+        <div style="position:relative;" id="rtype-wrap">
+          <button onclick="toggleRtypeDropdown()" title="Typ regrese"
+            style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
+            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">📈</button>
+          <div class="rtype-dropdown" id="rtype-dropdown">
+            <button class="rtype-option selected" onclick="selectRtype('linear',this)">Lineární (y = ax + b)</button>
+            <button class="rtype-option" onclick="selectRtype('exponential',this)">Exponenciální (y = a·e^(bx))</button>
+            <button class="rtype-option" onclick="selectRtype('polynomial',this)">Polynomická 2° (y = ax² + bx + c)</button>
+            <button class="rtype-option" onclick="selectRtype('logarithmic',this)">Logaritmická (y = a·ln(x) + b)</button>
+            <button class="rtype-option" onclick="selectRtype('gaussian',this)">Gauss</button>
+            <button class="rtype-option" onclick="selectRtype('gaussian2',this)">2× Gauss</button>
+            <button class="rtype-option" onclick="selectRtype('gaussian3',this)">3× Gauss</button>
+          </div>
+        </div>
+
+        <button id="btn-select" onclick="toggleSelectMode()" title="Vybrat oblast"
+          style="background:transparent;border:none;cursor:pointer;font-size:19px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text)"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">▣</button>
+
+        <button id="btn-ci" onclick="toggleCI()" title="Interval spolehlivosti 95 %"
+          style="background:transparent;border:none;cursor:pointer;font-size:15px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;font-weight:700;font-family:'Sora',sans-serif;color:var(--text)"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">95%</button>
+
+        <button onclick="saveGraph()" title="Uložit graf (PNG)"
+          style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text)"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">💾</button>
+
+        <button id="btn-regrese" onclick="toggleRegression()" title="Spustit analýzu"
+          style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text)"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">📊</button>
+
       </div>
-      <div class="btns">
-        <button class="btn btn-primary" id="btn-regrese" onclick="toggleRegression()">📊 Regrese</button>
-        <button class="btn btn-sec" id="btn-select" onclick="toggleSelectMode()">⬚ Vybrat oblast</button>
-        <button class="btn btn-sec" id="btn-ci" onclick="toggleCI()">
-          ◌ Interval spolehlivosti 95 %
-        </button>
-        <button class="btn btn-sec" onclick="saveGraph()">💾 Uložit graf (PNG)</button>
-      </div>
+
+      <!-- Skrytý select pro kompatibilitu s JS -->
+      <select id="rType" style="display:none" onchange="updateGeneralEq(); recomputeKeepVis()">
+        <option value="linear">Lineární (y = ax + b)</option>
+        <option value="exponential">Exponenciální (y = a·e^(bx))</option>
+        <option value="polynomial">Polynomická 2° (y = ax² + bx + c)</option>
+        <option value="logarithmic">Logaritmická (y = a·ln(x) + b)</option>
+        <option value="gaussian">Gauss</option>
+        <option value="gaussian2">2× Gauss</option>
+        <option value="gaussian3">3× Gauss</option>
+      </select>
 
       <div class="results-panel">
         <div class="sec-label" style="margin-bottom:8px;">Regresní parametry:</div>
@@ -707,18 +767,40 @@ function toggleCI(){
   showCI=!showCI;
   const btn=document.getElementById('btn-ci');
   if(showCI){
-    btn.textContent='◉ Interval spolehlivosti 95 %';
-    btn.style.background='var(--accent)';
-    btn.style.color='#fff';
-    btn.style.borderColor='var(--accent)';
+    btn.style.opacity='1';
+    btn.style.color='var(--accent)';
   } else {
-    btn.textContent='◌ Interval spolehlivosti 95 %';
-    btn.style.background='';
-    btn.style.color='';
-    btn.style.borderColor='';
+    btn.style.opacity='.6';
+    btn.style.color='var(--text)';
   }
   recomputeKeepVis();
 }
+
+function toggleRtypeDropdown(){
+  const dd=document.getElementById('rtype-dropdown');
+  dd.classList.toggle('open');
+}
+
+function selectRtype(value, btn){
+  // Update hidden select
+  const sel=document.getElementById('rType');
+  sel.value=value;
+  // Update option highlight
+  document.querySelectorAll('.rtype-option').forEach(b=>b.classList.remove('selected'));
+  btn.classList.add('selected');
+  // Close dropdown
+  document.getElementById('rtype-dropdown').classList.remove('open');
+  updateGeneralEq();
+  recomputeKeepVis();
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click',e=>{
+  const wrap=document.getElementById('rtype-wrap');
+  if(wrap && !wrap.contains(e.target)){
+    document.getElementById('rtype-dropdown')?.classList.remove('open');
+  }
+});
 
 function updateGeneralEq(){
   const general={
@@ -778,7 +860,7 @@ function toggleRegression(){
     recomputeKeepVis();
   } else {
     regressionOn=false;
-    document.getElementById('btn-regrese').textContent='📊 Regrese';
+    const _br=document.getElementById('btn-regrese'); if(_br){_br.style.color='var(--text)';_br.style.opacity='.6';_br.title='Spustit analýzu';}
     document.getElementById('resEq').textContent='—'; document.getElementById('eq-general').style.display='';
     document.getElementById('resParams').textContent='';
     lastResult=null;
@@ -861,7 +943,7 @@ function computeRegression(){
 
   displayResults(result, x.length, x.length+excl.length);
   lastResult=result; lastData={x,y,excl};
-  document.getElementById('btn-regrese').textContent='✕ Skrýt regresi';
+  const _br2=document.getElementById('btn-regrese'); if(_br2){_br2.style.color='var(--accent)';_br2.style.opacity='1';_br2.title='Skrýt regresi';}
   updateChart(result, x, y, excl);
 }
 
@@ -1115,7 +1197,7 @@ function parseAndFill(text){
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
   regressionOn=false;
-  document.getElementById('btn-regrese').textContent='📊 Regrese';
+  const _br=document.getElementById('btn-regrese'); if(_br){_br.style.color='var(--text)';_br.style.opacity='.6';_br.title='Spustit analýzu';}
   document.getElementById('resEq').textContent='—'; document.getElementById('eq-general').style.display='';
   document.getElementById('resParams').textContent='';
 
@@ -1148,10 +1230,9 @@ function toggleSelectMode(){
   const btn=document.getElementById('btn-select');
   const overlay=document.getElementById('sel-overlay');
   if(selectMode){
-    btn.textContent='✕ Zrušit výběr';
-    btn.style.borderColor='var(--accent)';
+    btn.style.opacity='1';
     btn.style.color='var(--accent)';
-    overlay.classList.add('active');
+    btn.title='Zrušit výběr';
     const tb=document.getElementById('tbody');
     tb.querySelectorAll('input[type="checkbox"]').forEach(cb=>cb.checked=false);
     updateMasterCheckbox();
@@ -1164,10 +1245,9 @@ function toggleSelectMode(){
 function exitSelectMode(){
   selectMode=false;
   const btn=document.getElementById('btn-select');
-  btn.textContent='⬚ Vybrat oblast';
-  btn.style.borderColor='';
-  btn.style.color='';
-  const overlay=document.getElementById('sel-overlay');
+  btn.style.opacity='.6';
+  btn.style.color='var(--text)';
+  btn.title='Vybrat oblast';
   overlay.classList.remove('active');
   const r=overlay.querySelector('.sel-rect');
   if(r) r.remove();
@@ -1275,7 +1355,7 @@ function clearData(){
   const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
   if(lx) lx.value='x';
   if(ly) ly.value='y';
-  document.getElementById('btn-regrese').textContent='📊 Regrese';
+  const _br=document.getElementById('btn-regrese'); if(_br){_br.style.color='var(--text)';_br.style.opacity='.6';_br.title='Spustit analýzu';}
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
   for(let i=0;i<6;i++) addRow();
