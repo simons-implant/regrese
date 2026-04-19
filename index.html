@@ -190,7 +190,29 @@ td input.cell:focus{
 
   <div class="main">
     <div class="left">
-      <div class="sec-label">Zadejte data (x, y):</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <div class="sec-label" style="margin-bottom:0;">Zadejte data (x, y):</div>
+        <div style="display:flex;gap:4px;">
+          <button onclick="document.getElementById('file-input').click()" title="Načíst soubor"
+            style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
+            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">📂</button>
+          <button onclick="saveData()" title="Uložit data jako TXT"
+            style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;"
+            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">💾</button>
+        </div>
+        <input type="file" id="file-input" accept=".txt,.csv,.tsv,.dat" style="display:none" onchange="loadFile(this)">
+      </div>
+      <div style="display:grid;grid-template-columns:32px 46px 1fr 1fr;gap:4px;padding:0 1px;">
+        <div></div><div></div>
+        <input id="label-x" type="text" placeholder="osa x" value="x"
+          style="background:var(--btn);color:var(--text);border:1px solid var(--border);
+                 border-radius:7px;padding:4px 8px;font-family:'Sora',sans-serif;font-size:12px;outline:none;min-width:0;"
+          oninput="axisLabels.x=this.value.trim()||'x'; axisLabelsFromFile=true; if(chartInst){if(regressionOn)computeRegression();else showPointsOnly();}">
+        <input id="label-y" type="text" placeholder="osa y" value="y"
+          style="background:var(--btn);color:var(--text);border:1px solid var(--border);
+                 border-radius:7px;padding:4px 8px;font-family:'Sora',sans-serif;font-size:12px;outline:none;min-width:0;"
+          oninput="axisLabels.y=this.value.trim()||'y'; axisLabelsFromFile=true; if(chartInst){if(regressionOn)computeRegression();else showPointsOnly();}">
+      </div>
       <div class="tbl-wrap">
         <table>
           <thead><tr><th>#</th><th><input type="checkbox" id="cb-all" checked onchange="toggleAll(this.checked)" title="Zaškrtnout/odškrtnout vše"></th><th>x</th><th>y</th></tr></thead>
@@ -200,8 +222,6 @@ td input.cell:focus{
 
       <div class="btns">
         <button class="btn btn-primary" id="btn-regrese" onclick="toggleRegression()">📊 Regrese</button>
-        <button class="btn btn-sec"     onclick="document.getElementById('file-input').click()">📂 Načíst soubor</button>
-        <input type="file" id="file-input" accept=".txt,.csv,.tsv,.dat" style="display:none" onchange="loadFile(this)">
         <button class="btn btn-sec" id="btn-select" onclick="toggleSelectMode()">⬚ Vybrat oblast</button>
         <button class="btn btn-sec"     onclick="swapXY()">🔄 Prohodit x a y</button>
         <button class="btn btn-sec"     onclick="clearData()">🗑️ Smazat data</button>
@@ -801,7 +821,10 @@ function parseAndFill(text){
     dataStart=1;
   }
   axisLabels={x:headerX, y:headerY};
-  axisLabelsFromFile = (dataStart === 1); // true pouze pokud byla detekována hlavička
+  axisLabelsFromFile = (dataStart === 1);
+  const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
+  if(lx) lx.value=axisLabels.x;
+  if(ly) ly.value=axisLabels.y;
 
   const rows=[];
   for(let i=dataStart;i<lines.length;i++){
@@ -932,6 +955,26 @@ document.addEventListener('DOMContentLoaded',()=>{
 /* ══════════════════════════════════════════════
    ACTIONS
 ══════════════════════════════════════════════ */
+function saveData(){
+  const tb=document.getElementById('tbody');
+  const lx=document.getElementById('label-x')?.value.trim()||'x';
+  const ly=document.getElementById('label-y')?.value.trim()||'y';
+  const rows=[];
+  for(let i=0;i<tb.rows.length;i++){
+    const xv=tb.rows[i].cells[2]?.querySelector('input')?.value.trim().replace(',','.');
+    const yv=tb.rows[i].cells[3]?.querySelector('input')?.value.trim().replace(',','.');
+    if(!xv||!yv) continue;
+    const xf=parseFloat(xv), yf=parseFloat(yv);
+    if(!isNaN(xf)&&!isNaN(yf)) rows.push(`${xv}\t${yv}`);
+  }
+  if(!rows.length){ alert('Tabulka neobsahuje žádná data.'); return; }
+  const content=`${lx}\t${ly}\n`+rows.join('\n');
+  const a=document.createElement('a');
+  a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(content);
+  a.download='data.txt';
+  a.click();
+}
+
 function swapXY(){
   const tb=document.getElementById('tbody');
   for(let i=0;i<tb.rows.length;i++){
@@ -939,8 +982,12 @@ function swapXY(){
     const yI=tb.rows[i].cells[3].querySelector('input');
     [xI.value,yI.value]=[yI.value,xI.value];
   }
-  // Prohodit popisky os pouze pokud byly načteny ze souboru s hlavičkou
-  if(axisLabelsFromFile) [axisLabels.x, axisLabels.y]=[axisLabels.y, axisLabels.x];
+  // Vždy prohodit popisky os
+  [axisLabels.x, axisLabels.y]=[axisLabels.y, axisLabels.x];
+  axisLabelsFromFile=true;
+  const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
+  if(lx) lx.value=axisLabels.x;
+  if(ly) ly.value=axisLabels.y;
   if(regressionOn) computeRegression();
   else showPointsOnly();
 }
@@ -950,6 +997,9 @@ function clearData(){
   regressionOn=false;
   axisLabels={x:'x', y:'y'};
   axisLabelsFromFile=false;
+  const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
+  if(lx) lx.value='x';
+  if(ly) ly.value='y';
   document.getElementById('btn-regrese').textContent='📊 Regrese';
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
