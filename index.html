@@ -15,7 +15,7 @@
   --accent:#4a9eff;--danger:#ff6060;--danger-h:#ff7c7c;
   --success:#4cde8c;--btn:#2a2a33;--btn-h:#34343e;
   --chart:#1c1c24;--shadow:0 4px 20px rgba(0,0,0,.5);
-  --muted:#7070880; /* fix typo below */
+  --muted:#7070880;
 }
 [data-theme="dark"]{
   --text-muted:#70708a;
@@ -36,7 +36,6 @@ body{
 
 .app{display:flex;flex-direction:column;height:100vh;padding:14px;gap:10px;}
 
-/* ── topbar ── */
 .topbar{
   display:flex;align-items:center;gap:10px;flex-wrap:wrap;
   background:var(--surface);border:1px solid var(--border);
@@ -65,10 +64,8 @@ select#rType:focus{border-color:var(--accent);}
 .tbtn:hover{background:var(--btn-h);}
 .spacer{flex:1;}
 
-/* ── main ── */
 .main{display:flex;gap:14px;flex:1;min-height:0;}
 
-/* ── left panel ── */
 .left{display:flex;flex-direction:column;gap:8px;width:305px;flex-shrink:0;}
 
 .sec-label{
@@ -111,7 +108,6 @@ td input.cell:focus{
   outline:1.5px solid var(--accent);outline-offset:-1.5px;
 }
 
-/* ── buttons ── */
 .btns{display:flex;flex-direction:column;gap:5px;}
 .btn{
   border:1px solid var(--border);border-radius:8px;
@@ -126,7 +122,6 @@ td input.cell:focus{
 .btn-sec{background:var(--btn);color:var(--text);}
 .btn-sec:hover{background:var(--btn-h);}
 
-/* ── results ── */
 .results{
   background:var(--surface);border:1px solid var(--border);
   border-radius:10px;padding:11px 13px;font-size:13px;
@@ -143,7 +138,6 @@ td input.cell:focus{
 .r2{color:var(--success);font-weight:600;}
 .err{color:var(--danger);}
 
-/* ── chart ── */
 .right{
   flex:1;background:var(--surface);border:1px solid var(--border);
   border-radius:12px;padding:14px;
@@ -163,7 +157,6 @@ td input.cell:focus{
   pointer-events:none;
 }
 
-/* ── scrollbar ── */
 .tbl-wrap::-webkit-scrollbar{width:5px;}
 .tbl-wrap::-webkit-scrollbar-track{background:transparent;}
 .tbl-wrap::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
@@ -241,6 +234,7 @@ let lastResult = null;
 let lastData   = null;
 let regressionOn = false;
 let axisLabels = {x:'x', y:'y'};
+let axisLabelsFromFile = false; // true pouze pokud byla detekována hlavička ze souboru
 
 const sysMQ = window.matchMedia('(prefers-color-scheme: dark)');
 sysMQ.addEventListener('change', () => {
@@ -306,7 +300,6 @@ function calcSE(Xd, y, yp, p) {
   return inv.map((_,i) => Math.sqrt(Math.max(0, inv[i][i]*s2)));
 }
 
-// Simple linear regression; returns {a:slope, b:intercept}
 function linRaw(x, y) {
   const Xd = x.map(xi=>[xi,1]);
   const Xt = matT(Xd);
@@ -438,12 +431,10 @@ function inv4(A){
 
 function doGaussian(x,y){
   if(x.length<5) throw new Error("Gaussovský fit vyžaduje alespoň 5 bodů.");
-  // Počáteční odhady
   const ymax=Math.max(...y), ymin=Math.min(...y);
   const A0=ymax-ymin;
   const mu0=x[y.indexOf(ymax)];
   const c0=ymin;
-  // Odhad sigma z šířky v polovině maxima
   const half=c0+A0/2;
   const above=x.filter((_,i)=>y[i]>=half);
   const sig0=above.length>1?(Math.max(...above)-Math.min(...above))/2.355 : (Math.max(...x)-Math.min(...x))/6;
@@ -459,7 +450,6 @@ function doGaussian(x,y){
   const yp=x.map(xi=>fn(xi,[A,mu,sig,c]));
   const r2=calcR2(y,yp);
 
-  // Standardní chyby přes kovariační matici
   const Jac=x.map(xi=>jac(xi,[A,mu,sig,c]));
   const m=4, n=x.length;
   const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j)=>s+j[a]*j[b],0)));
@@ -582,10 +572,8 @@ function toggleRegression(){
 }
 
 function showPointsOnly(){
-  // zobraz všechny body z tabulky bez regresní křivky
   const {x,y,excl}=getTableData();
   const allX=[...x,...excl.map(p=>p[0])];
-  const allY=[...y,...excl.map(p=>p[1])];
   if(!allX.length){ clearChart(); return; }
 
   if(chartInst){chartInst.destroy();chartInst=null;}
@@ -617,7 +605,7 @@ function showPointsOnly(){
       },
       plugins:{
         legend:{labels:{color:c.tick,usePointStyle:true,font:{family:'Sora',size:11},boxWidth:10,padding:14}},
-        tooltip:{callbacks:{label:ctx=>{const d=ctx.raw;return ` (${d.x}, ${typeof d.y==='number'?d.y.toPrecision(6):d.y})`;}}}
+        tooltip:{callbacks:{label:ctx=>{const d=ctx.raw;return ` (${d.x}, ${typeof d.y==='number'?d.y.toPrecision(6):d.y})`;}}},
       }
     },
     plugins:[{id:'bgFill',beforeDraw(chart){const{ctx:c2,chartArea}=chart;if(!chartArea)return;c2.save();c2.fillStyle=isDark?'#1c1c24':'#fafafa';c2.fillRect(chartArea.left,chartArea.top,chartArea.width,chartArea.height);c2.restore();}}]
@@ -632,7 +620,6 @@ function computeRegression(){
   if(x.length<2){
     eqEl.innerHTML='<span class="err">❗ Zadejte alespoň 2 zaškrtnuté body.</span>';
     pmEl.innerHTML='';
-    // i přesto zobraz vyloučené body
     showPointsOnly();
     return;
   }
@@ -701,7 +688,6 @@ function clearChart(){
 function updateChart(result, x, y, excl){
   if(chartInst){chartInst.destroy();chartInst=null;}
 
-  // Smooth curve – 120 points
   const xMin=Math.min(...x), xMax=Math.max(...x);
   const step=(xMax-xMin)/119||1;
   const xSmooth=Array.from({length:120},(_,i)=>xMin+i*step);
@@ -785,20 +771,14 @@ function updateChart(result, x, y, excl){
 }
 
 /* ══════════════════════════════════════════════
-   ACTIONS
-══════════════════════════════════════════════ */
-/* ══════════════════════════════════════════════
    FILE IMPORT
 ══════════════════════════════════════════════ */
 function loadFile(input){
   const file=input.files[0];
   if(!file) return;
-  input.value=''; // reset so same file can be re-loaded
+  input.value='';
   const reader=new FileReader();
-  reader.onload=e=>{
-    const text=e.target.result;
-    parseAndFill(text);
-  };
+  reader.onload=e=>{ parseAndFill(e.target.result); };
   reader.readAsText(file);
 }
 
@@ -806,7 +786,6 @@ function parseAndFill(text){
   const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
   if(!lines.length) return;
 
-  // Detect separator: try tab, semicolon, comma, multiple spaces
   function splitLine(line){
     if(line.includes('\t'))  return line.split('\t').map(s=>s.trim());
     if(line.includes(';'))   return line.split(';').map(s=>s.trim());
@@ -814,7 +793,6 @@ function parseAndFill(text){
     return line.split(/\s+/).filter(s=>s!=='');
   }
 
-  // Detect header: first line contains non-numeric token
   let headerX='x', headerY='y', dataStart=0;
   const firstParts=splitLine(lines[0]);
   if(firstParts.length>=2 && (isNaN(firstParts[0].replace(',','.')) || isNaN(firstParts[1].replace(',','.')))){
@@ -823,8 +801,8 @@ function parseAndFill(text){
     dataStart=1;
   }
   axisLabels={x:headerX, y:headerY};
+  axisLabelsFromFile = (dataStart === 1); // true pouze pokud byla detekována hlavička
 
-  // Parse data rows
   const rows=[];
   for(let i=dataStart;i<lines.length;i++){
     const parts=splitLine(lines[i]);
@@ -835,7 +813,6 @@ function parseAndFill(text){
   }
   if(!rows.length){ alert('Nepodařilo se načíst žádná data.'); return; }
 
-  // Fill table
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
   regressionOn=false;
@@ -854,7 +831,6 @@ function parseAndFill(text){
                  onkeydown="handleKey(event,${i},'y')" oninput="autoRecompute()"></td>`;
     tb.appendChild(tr);
   });
-  // always keep at least one empty row at the end
   addRow();
   updateMasterCheckbox();
   showPointsOnly();
@@ -877,7 +853,6 @@ function toggleSelectMode(){
     btn.style.borderColor='var(--accent)';
     btn.style.color='var(--accent)';
     overlay.classList.add('active');
-    // uncheck all points
     const tb=document.getElementById('tbody');
     tb.querySelectorAll('input[type="checkbox"]').forEach(cb=>cb.checked=false);
     updateMasterCheckbox();
@@ -895,7 +870,6 @@ function exitSelectMode(){
   btn.style.color='';
   const overlay=document.getElementById('sel-overlay');
   overlay.classList.remove('active');
-  // remove rect if any
   const r=overlay.querySelector('.sel-rect');
   if(r) r.remove();
   selStart=null; selRect=null;
@@ -912,7 +886,6 @@ document.addEventListener('DOMContentLoaded',()=>{
   overlay.addEventListener('mousedown',e=>{
     if(!selectMode) return;
     selStart=getOverlayPos(e,overlay);
-    // create rect element
     const r=document.createElement('div');
     r.className='sel-rect';
     r.style.left=selStart.x+'px'; r.style.top=selStart.y+'px';
@@ -935,29 +908,20 @@ document.addEventListener('DOMContentLoaded',()=>{
   overlay.addEventListener('mouseup',e=>{
     if(!selectMode||!selStart||!selRect||!chartInst) return;
     const pos=getOverlayPos(e,overlay);
-
-    // pixel bounds of selection
     const px1=Math.min(selStart.x,pos.x), px2=Math.max(selStart.x,pos.x);
     const py1=Math.min(selStart.y,pos.y), py2=Math.max(selStart.y,pos.y);
-
-    // convert to data coords via chart scales
     const xScale=chartInst.scales.x, yScale=chartInst.scales.y;
     const dxMin=xScale.getValueForPixel(px1), dxMax=xScale.getValueForPixel(px2);
     const dyMin=yScale.getValueForPixel(py2), dyMax=yScale.getValueForPixel(py1);
-
-    // check rows whose data falls inside
     const tb=document.getElementById('tbody');
-    let found=0;
     for(let i=0;i<tb.rows.length;i++){
       const xv=parseFloat(tb.rows[i].cells[2]?.querySelector('input')?.value?.replace(',','.'));
       const yv=parseFloat(tb.rows[i].cells[3]?.querySelector('input')?.value?.replace(',','.'));
       if(!isNaN(xv)&&!isNaN(yv) && xv>=dxMin&&xv<=dxMax && yv>=dyMin&&yv<=dyMax){
         const cb=tb.rows[i].cells[1]?.querySelector('input[type="checkbox"]');
-        if(cb){ cb.checked=true; found++; }
+        if(cb) cb.checked=true;
       }
     }
-
-    // clean up
     selRect.remove(); selRect=null; selStart=null;
     exitSelectMode();
     updateMasterCheckbox();
@@ -965,6 +929,9 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
 });
 
+/* ══════════════════════════════════════════════
+   ACTIONS
+══════════════════════════════════════════════ */
 function swapXY(){
   const tb=document.getElementById('tbody');
   for(let i=0;i<tb.rows.length;i++){
@@ -972,6 +939,8 @@ function swapXY(){
     const yI=tb.rows[i].cells[3].querySelector('input');
     [xI.value,yI.value]=[yI.value,xI.value];
   }
+  // Prohodit popisky os pouze pokud byly načteny ze souboru s hlavičkou
+  if(axisLabelsFromFile) [axisLabels.x, axisLabels.y]=[axisLabels.y, axisLabels.x];
   if(regressionOn) computeRegression();
   else showPointsOnly();
 }
@@ -979,6 +948,8 @@ function swapXY(){
 function clearData(){
   if(!confirm('Opravdu smazat všechna data?')) return;
   regressionOn=false;
+  axisLabels={x:'x', y:'y'};
+  axisLabelsFromFile=false;
   document.getElementById('btn-regrese').textContent='📊 Regrese';
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
@@ -992,7 +963,6 @@ function saveGraph(){
   if(!lastResult||!lastData){alert('Nejprve proveďte regresi.');return;}
   const {x,y,excl}=lastData, result=lastResult;
 
-  // Offscreen canvas – vždy světlé barvy
   const tmp=document.createElement('canvas');
   tmp.width=900; tmp.height=600;
   document.body.appendChild(tmp);
