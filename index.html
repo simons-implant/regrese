@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Regrese – Analýza dat</title>
+<title>Regresní analýza</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -179,11 +179,11 @@ td input.cell:focus{
 <body>
 <div class="app">
   <header class="topbar">
-    <div class="app-title">📊 <span>Regrese</span></div>
+    <div class="app-title">📊 <span>Regresní analýza</span></div>
     <select id="rType" onchange="autoRecompute()">
       <option value="linear">Lineární (y = ax + b)</option>
       <option value="exponential">Exponenciální (y = a·e^(bx))</option>
-      <option value="polynomial">Polynomiální 2° (y = ax² + bx + c)</option>
+      <option value="polynomial">Polynomická 2° (y = ax² + bx + c)</option>
       <option value="logarithmic">Logaritmická (y = a·ln(x) + b)</option>
       <option value="gaussian">Gauss (y = A·e^(-(x-μ)²/2σ²) + c)</option>
     </select>
