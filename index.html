@@ -936,7 +936,8 @@ function updateChart(result, x, y, excl){
       borderColor:'rgba(255,107,107,0.4)',
       backgroundColor:'rgba(255,107,107,0.18)',
       borderWidth:1,borderDash:[4,3],
-      pointRadius:0,fill:'+1',tension:0,order:4
+      pointRadius:0,fill:'+1',tension:0,order:4,
+      pointStyle:'rect'
     });
     datasets.push({
       type:'line',label:'_ciLower',
@@ -1303,7 +1304,8 @@ function saveGraph(fmt){
     allDs.push({
       type:'line',label:'IS 95 %',data:ciUpper,
       borderColor:'rgba(200,50,50,0.4)',backgroundColor:'rgba(200,50,50,0.12)',
-      borderWidth:1,borderDash:[4,3],pointRadius:0,fill:'+1',tension:0,order:4
+      borderWidth:1,borderDash:[4,3],pointRadius:0,fill:'+1',tension:0,order:4,
+      pointStyle:'rect'
     });
     allDs.push({
       type:'line',label:'_ciLower',data:ciLower,
@@ -1334,7 +1336,8 @@ function saveGraph(fmt){
       },
       plugins:{
         legend:{labels:{color:lc.tick,usePointStyle:true,
-                        font:{family:'Sora',size:11},boxWidth:10,padding:14}},
+                        font:{family:'Sora',size:11},boxWidth:10,padding:14,
+                        filter:item=>item.text!=='_ciLower'}},
         tooltip:{enabled:false}
       }
     },
@@ -1389,9 +1392,11 @@ function saveGraphSVG(){
   datasets.push({type:'data',pts:x.map((xi,i)=>[xi,y[i]])});
   datasets.push({type:'line',pts:xSmooth.map((xi,i)=>[xi,ySmooth[i]])});
 
-  // CI pro SVG
+  // CI pro SVG — zobraz jen pokud je showCI zapnuté A dataset je viditelný v živém grafu
+  const ciDatasetIdx=chartInst?chartInst.data.datasets.findIndex(d=>d.label==='IS 95 %'):-1;
+  const ciVisible=showCI && ciDatasetIdx>=0 && chartInst.isDatasetVisible(ciDatasetIdx);
   let ciSVG=null;
-  if(showCI && result.yp){
+  if(ciVisible && result.yp){
     const n=x.length;
     const p=result.type==='polynomial'?3:result.type==='gaussian'?4:result.type==='gaussian2'?7:result.type==='gaussian3'?10:2;
     const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
@@ -1437,15 +1442,18 @@ function saveGraphSVG(){
   // Datasets
   // Nejdřív CI pás (pod křivkou)
   if(ciSVG){
-    const uPts=ciSVG.upper.filter(p=>isFinite(p[1]));
-    const lPts=ciSVG.lower.filter(p=>isFinite(p[1])).reverse();
-    const polyPts=[...uPts,...lPts];
-    if(polyPts.length>2){
-      const poly=polyPts.map(p=>`${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
+    // Ořízni body na oblast grafu
+    const clip=([xi,yi])=>[
+      Math.max(ml, Math.min(ml+pw, px(xi))),
+      Math.max(mt, Math.min(mt+ph, py(yi)))
+    ];
+    const uPts=ciSVG.upper.filter(p=>isFinite(p[1])).map(clip);
+    const lPts=ciSVG.lower.filter(p=>isFinite(p[1])).map(clip).reverse();
+    if(uPts.length>1){
+      const poly=[...uPts,...lPts].map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
       svg+=`<polygon points="${poly}" fill="rgba(200,50,50,0.12)"/>`;
-      // Hranice přerušovanou čarou
-      const du=uPts.map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
-      const dl=ciSVG.lower.filter(p=>isFinite(p[1])).map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
+      const du=uPts.map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+      const dl=lPts.slice().reverse().map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
       svg+=`<path d="${du}" fill="none" stroke="rgba(200,50,50,0.4)" stroke-width="1" stroke-dasharray="4,3"/>`;
       svg+=`<path d="${dl}" fill="none" stroke="rgba(200,50,50,0.4)" stroke-width="1" stroke-dasharray="4,3"/>`;
     }
@@ -1469,15 +1477,29 @@ function saveGraphSVG(){
     }
   });
 
-  // Legend
+  // Legend — čti přímo z živého grafu pro konzistenci
   const legendItems=[];
-  if(excl.length>0&&(visibility.length===0||visibility[0])) legendItems.push({color:'#2264c0',label:`Vyloučeno (${excl.length})`,hollow:true});
-  if(visibility.length===0||visibility[excl.length>0?1:0]) legendItems.push({color:'#2264c0',label:'Data',hollow:false});
-  if(visibility.length===0||visibility[excl.length>0?2:1]) legendItems.push({color:'#cc3030',label:result.eq,line:true});
+  if(chartInst){
+    chartInst.data.datasets.forEach((ds,i)=>{
+      if(ds.label==='_ciLower') return; // přeskočit
+      if(!chartInst.isDatasetVisible(i)) return; // přeskočit skryté
+      if(ds.label==='IS 95 %'){
+        legendItems.push({label:'IS 95 %', ci:true});
+      } else if(ds.type==='line'){
+        legendItems.push({label:ds.label, color:'#cc3030', line:true});
+      } else if(ds.backgroundColor==='transparent'||ds.backgroundColor==='rgba(255,80,80,.5)'){
+        legendItems.push({label:ds.label, color:'#2264c0', hollow:true});
+      } else {
+        legendItems.push({label:ds.label, color:'#2264c0', hollow:false});
+      }
+    });
+  }
 
   let lx=ml+10;
   legendItems.forEach(item=>{
-    if(item.line){
+    if(item.ci){
+      svg+=`<rect x="${lx}" y="${mt+5}" width="20" height="10" fill="rgba(200,50,50,0.12)" stroke="rgba(200,50,50,0.4)" stroke-width="1" stroke-dasharray="4,2"/>`;
+    } else if(item.line){
       svg+=`<line x1="${lx}" y1="${mt+10}" x2="${lx+20}" y2="${mt+10}" stroke="${item.color}" stroke-width="2.5"/>`;
     } else if(item.hollow){
       svg+=`<circle cx="${lx+7}" cy="${mt+10}" r="5" fill="none" stroke="${item.color}" stroke-width="2"/>`;
