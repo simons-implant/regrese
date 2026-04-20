@@ -828,10 +828,7 @@ let recomputeTimer=null;
 function autoRecompute(){
   updateMasterCheckbox();
   clearTimeout(recomputeTimer);
-  recomputeTimer=setTimeout(()=>{
-    if(regressionOn) computeRegression();
-    else showPointsOnly();
-  },350);
+  recomputeTimer=setTimeout(()=>{ recomputeKeepVis(); },350);
 }
 
 function toggleAll(checked){
@@ -841,7 +838,7 @@ function toggleAll(checked){
     if(cb) cb.checked=checked;
   }
   clearTimeout(recomputeTimer);
-  recomputeTimer=setTimeout(computeRegression,350);
+  recomputeTimer=setTimeout(recomputeKeepVis,350);
 }
 
 function updateMasterCheckbox(){
@@ -1233,6 +1230,7 @@ function toggleSelectMode(){
     btn.style.opacity='1';
     btn.style.color='var(--accent)';
     btn.title='Zrušit výběr';
+    overlay.classList.add('active');
     const tb=document.getElementById('tbody');
     tb.querySelectorAll('input[type="checkbox"]').forEach(cb=>cb.checked=false);
     updateMasterCheckbox();
@@ -1245,6 +1243,7 @@ function toggleSelectMode(){
 function exitSelectMode(){
   selectMode=false;
   const btn=document.getElementById('btn-select');
+  const overlay=document.getElementById('sel-overlay');
   btn.style.opacity='.6';
   btn.style.color='var(--text)';
   btn.title='Vybrat oblast';
