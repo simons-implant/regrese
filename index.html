@@ -293,7 +293,7 @@ td input.cell:focus{
 
       <div class="sec-label" style="white-space:nowrap;">Nastavení regresní analýzy:</div>
 
-      <!-- Řádek ikon -->
+      <!-- Řádek ikon — regrese -->
       <div style="display:flex;gap:4px;">
 
         <!-- Výběr regrese -->
@@ -316,6 +316,17 @@ td input.cell:focus{
           style="background:transparent;border:none;cursor:pointer;font-size:19px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text)"
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">▣</button>
 
+        <button id="btn-regrese" onclick="toggleRegression()" title="Spustit analýzu"
+          style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text)"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">📊</button>
+
+      </div>
+
+      <div class="sec-label" style="white-space:nowrap;margin-top:4px;">Nastavení grafu:</div>
+
+      <!-- Řádek ikon — graf -->
+      <div style="display:flex;gap:4px;">
+
         <button id="btn-ci" onclick="toggleCI()" title="Interval spolehlivosti 95 %"
           style="background:transparent;border:none;cursor:pointer;font-size:15px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;font-weight:700;font-family:'Sora',sans-serif;color:var(--text)"
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">95%</button>
@@ -323,10 +334,6 @@ td input.cell:focus{
         <button onclick="saveGraph()" title="Uložit graf (PNG)"
           style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text)"
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">💾</button>
-
-        <button id="btn-regrese" onclick="toggleRegression()" title="Spustit analýzu"
-          style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text)"
-          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">📊</button>
 
       </div>
 
