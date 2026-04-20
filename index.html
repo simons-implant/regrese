@@ -337,6 +337,27 @@ td input.cell:focus{
 
       </div>
 
+      <!-- Rozsahy os -->
+      <div style="display:flex;gap:5px;align-items:center;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;flex:1;">
+          <input id="range-xmin" type="text" placeholder="x min"
+            style="background:var(--btn);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:4px 6px;font-family:'Fira Code',monospace;font-size:11px;outline:none;min-width:0;"
+            oninput="applyRange()">
+          <input id="range-xmax" type="text" placeholder="x max"
+            style="background:var(--btn);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:4px 6px;font-family:'Fira Code',monospace;font-size:11px;outline:none;min-width:0;"
+            oninput="applyRange()">
+          <input id="range-ymin" type="text" placeholder="y min"
+            style="background:var(--btn);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:4px 6px;font-family:'Fira Code',monospace;font-size:11px;outline:none;min-width:0;"
+            oninput="applyRange()">
+          <input id="range-ymax" type="text" placeholder="y max"
+            style="background:var(--btn);color:var(--text);border:1px solid var(--border);border-radius:7px;padding:4px 6px;font-family:'Fira Code',monospace;font-size:11px;outline:none;min-width:0;"
+            oninput="applyRange()">
+        </div>
+        <button onclick="resetRange()" title="Resetovat rozsah os (automaticky)"
+          style="background:transparent;border:none;cursor:pointer;font-size:18px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);flex-shrink:0;"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">⟳</button>
+      </div>
+
       <!-- Skrytý select pro kompatibilitu s JS -->
       <select id="rType" style="display:none" onchange="updateGeneralEq(); recomputeKeepVis()">
         <option value="linear">Lineární (y = ax + b)</option>
@@ -369,7 +390,8 @@ let lastData   = null;
 let regressionOn = false;
 let showCI = false;
 let axisLabels = {x:'x', y:'y'};
-let axisLabelsFromFile = false; // true pouze pokud byla detekována hlavička ze souboru
+let axisLabelsFromFile = false;
+let manualRange = {active:false, xMin:null, xMax:null, yMin:null, yMax:null}; // true pouze pokud byla detekována hlavička ze souboru
 
 const sysMQ = window.matchMedia('(prefers-color-scheme: dark)');
 sysMQ.addEventListener('change', () => {
@@ -809,6 +831,56 @@ document.addEventListener('click',e=>{
   }
 });
 
+function applyRange(){
+  const xMin=parseFloat(document.getElementById('range-xmin').value.replace(',','.'));
+  const xMax=parseFloat(document.getElementById('range-xmax').value.replace(',','.'));
+  const yMin=parseFloat(document.getElementById('range-ymin').value.replace(',','.'));
+  const yMax=parseFloat(document.getElementById('range-ymax').value.replace(',','.'));
+  manualRange={
+    active: !isNaN(xMin)||!isNaN(xMax)||!isNaN(yMin)||!isNaN(yMax),
+    xMin: isNaN(xMin)?null:xMin,
+    xMax: isNaN(xMax)?null:xMax,
+    yMin: isNaN(yMin)?null:yMin,
+    yMax: isNaN(yMax)?null:yMax
+  };
+  // Zachovej viditelnost
+  const vis=chartInst?chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i)):[];
+  if(regressionOn) computeRegression(); else showPointsOnly();
+  if(chartInst) vis.forEach((v,i)=>{ if(!v) chartInst.hide(i); });
+  if(chartInst) chartInst.update();
+}
+
+function resetRange(){
+  manualRange={active:false,xMin:null,xMax:null,yMin:null,yMax:null};
+  ['range-xmin','range-xmax','range-ymin','range-ymax'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.value='';
+  });
+  recomputeKeepVis();
+}
+
+function getScaleOpts(axis){
+  // Vrátí min/max pro osu pokud je manuálně nastaveno
+  if(!manualRange.active) return {};
+  const mn = axis==='x' ? manualRange.xMin : manualRange.yMin;
+  const mx = axis==='x' ? manualRange.xMax : manualRange.yMax;
+  const opts={};
+  if(mn!==null) opts.min=mn;
+  if(mx!==null) opts.max=mx;
+  return opts;
+}
+
+function updateRangeInputs(){
+  // Po překreslení doplní inputy aktuálními hodnotami pokud jsou prázdné
+  if(!chartInst||manualRange.active) return;
+  const xs=chartInst.scales.x, ys=chartInst.scales.y;
+  const fmt=v=>parseFloat(v.toPrecision(6));
+  document.getElementById('range-xmin').value=fmt(xs.min);
+  document.getElementById('range-xmax').value=fmt(xs.max);
+  document.getElementById('range-ymin').value=fmt(ys.min);
+  document.getElementById('range-ymax').value=fmt(ys.max);
+}
+
 function updateGeneralEq(){
   const general={
     linear:'y = ax + b',
@@ -905,8 +977,8 @@ function showPointsOnly(){
     options:{
       responsive:true,maintainAspectRatio:false,animation:{duration:200},
       scales:{
-        x:{type:'linear',grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:axisLabels.x,color:c.tick,font:{family:'Sora',size:12}}},
-        y:{type:'linear',grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:axisLabels.y,color:c.tick,font:{family:'Sora',size:12}}}
+        x:{type:'linear',...getScaleOpts('x'),grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:axisLabels.x,color:c.tick,font:{family:'Sora',size:12}}},
+        y:{type:'linear',...getScaleOpts('y'),grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:axisLabels.y,color:c.tick,font:{family:'Sora',size:12}}}
       },
       plugins:{
         legend:{labels:{color:c.tick,usePointStyle:true,font:{family:'Sora',size:11},boxWidth:10,padding:14}},
@@ -915,6 +987,7 @@ function showPointsOnly(){
     },
     plugins:[{id:'bgFill',beforeDraw(chart){const{ctx:c2,chartArea}=chart;if(!chartArea)return;c2.save();c2.fillStyle=isDark?'#1c1c24':'#fafafa';c2.fillRect(chartArea.left,chartArea.top,chartArea.width,chartArea.height);c2.restore();}}]
   });
+  updateRangeInputs();
 }
 
 function computeRegression(){
@@ -1093,7 +1166,7 @@ function updateChart(result, x, y, excl){
       responsive:true,maintainAspectRatio:false,
       animation:{duration:300},
       scales:{
-        x:{type:'linear',
+        x:{type:'linear',...getScaleOpts('x'),
            grid:{color:c.grid},
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
@@ -1150,6 +1223,7 @@ function updateChart(result, x, y, excl){
       }
     }]
   });
+  updateRangeInputs();
 }
 
 /* ══════════════════════════════════════════════
@@ -1350,6 +1424,18 @@ function swapXY(){
   const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
   if(lx) lx.value=axisLabels.x;
   if(ly) ly.value=axisLabels.y;
+  // Prohodit rozsahy os
+  const rxMin=document.getElementById('range-xmin');
+  const rxMax=document.getElementById('range-xmax');
+  const ryMin=document.getElementById('range-ymin');
+  const ryMax=document.getElementById('range-ymax');
+  if(rxMin&&rxMax&&ryMin&&ryMax){
+    [rxMin.value,ryMin.value]=[ryMin.value,rxMin.value];
+    [rxMax.value,ryMax.value]=[ryMax.value,rxMax.value];
+  }
+  // Prohodit manualRange
+  [manualRange.xMin,manualRange.yMin]=[manualRange.yMin,manualRange.xMin];
+  [manualRange.xMax,manualRange.yMax]=[manualRange.yMax,manualRange.xMax];
   recomputeKeepVis();
 }
 
