@@ -6,6 +6,8 @@
 <title>Regresní analýza</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg>">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;500&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
@@ -88,10 +90,13 @@ select#rType:focus{border-color:var(--accent);}
 .eq-bar{
   background:var(--surface);border:1px solid var(--border);
   border-radius:10px;padding:9px 14px;
-  font-family:'Fira Code',monospace;font-size:13px;
-  font-weight:600;color:var(--accent);
-  box-shadow:var(--shadow);white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;
+  box-shadow:var(--shadow);overflow:hidden;
+}
+.eq-general{
+  font-size:14px;color:var(--text-muted);margin-bottom:6px;
+}
+.eq-fitted{
+  font-size:15px;color:var(--accent);
 }
 .side-panel{
   display:flex;flex-direction:column;gap:8px;
@@ -284,8 +289,8 @@ td input.cell:focus{
         </div>
       </div>
       <div class="eq-bar">
-        <div id="eq-general" style="color:var(--text-muted);font-size:12px;"></div>
-        <div id="resEq" style="margin-top:2px;">—</div>
+        <div id="eq-general" class="eq-general"></div>
+        <div id="resEq" class="eq-fitted"></div>
       </div>
     </div>
 
@@ -881,19 +886,37 @@ function updateRangeInputs(){
   document.getElementById('range-ymax').value=fmt(ys.max);
 }
 
+function renderEq(elId, latex, color){
+  const el=document.getElementById(elId);
+  if(!el) return;
+  try{
+    katex.render(latex, el, {throwOnError:false, displayMode:false});
+    if(color) el.style.color=color;
+  }catch(e){
+    el.textContent=latex;
+  }
+}
+
+const GENERAL_TEX={
+  linear:       'y = a\\,x + b',
+  exponential:  'y = a\\cdot e^{bx}',
+  polynomial:   'y = a\\,x^2 + b\\,x + c',
+  logarithmic:  'y = a\\cdot\\ln(x) + b',
+  gaussian:     'y = A\\,\\exp\\!\\left(-\\dfrac{(x-\\mu)^2}{2\\sigma^2}\\right) + c',
+  gaussian2:    'y = A_1\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_1)^2}{2\\sigma_1^2}\\right) + A_2\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_2)^2}{2\\sigma_2^2}\\right) + c',
+  gaussian3:    'y = A_1\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_1)^2}{2\\sigma_1^2}\\right) + A_2\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_2)^2}{2\\sigma_2^2}\\right) + A_3\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_3)^2}{2\\sigma_3^2}\\right) + c'
+};
+
 function updateGeneralEq(){
-  const general={
-    linear:'y = ax + b',
-    exponential:'y = a·e^(bx)',
-    polynomial:'y = ax² + bx + c',
-    logarithmic:'y = a·ln(x) + b',
-    gaussian:'y = A·e^(-(x-μ)²/2σ²) + c',
-    gaussian2:'y = A₁·e^(-(x-μ₁)²/2σ₁²) + A₂·e^(-(x-μ₂)²/2σ₂²) + c',
-    gaussian3:'y = A₁·e^(-(x-μ₁)²/2σ₁²) + A₂·e^(-(x-μ₂)²/2σ₂²) + A₃·e^(-(x-μ₃)²/2σ₃²) + c'
-  };
   const type=document.getElementById('rType').value;
   const el=document.getElementById('eq-general');
-  if(el) el.textContent=general[type]||'';
+  if(!el) return;
+  const tex=GENERAL_TEX[type]||'';
+  try{
+    katex.render(tex, el, {throwOnError:false, displayMode:false});
+  }catch(e){
+    el.textContent=tex;
+  }
 }
 
 function recomputeKeepVis(){
@@ -937,7 +960,7 @@ function toggleRegression(){
   } else {
     regressionOn=false;
     const _br=document.getElementById('btn-regrese'); if(_br){_br.style.color='var(--text)';_br.style.opacity='.6';_br.title='Spustit analýzu';}
-    document.getElementById('resEq').textContent='—'; document.getElementById('eq-general').style.display='';
+    const _eq=document.getElementById('resEq'); if(_eq) _eq.textContent='—';
     document.getElementById('resParams').textContent='';
     lastResult=null;
     // Zachovej viditelnost bodů
@@ -1027,11 +1050,37 @@ function computeRegression(){
 /* ══════════════════════════════════════════════
    DISPLAY RESULTS
 ══════════════════════════════════════════════ */
+function resultToTex(r){
+  const n=v=>v<0?`(${f6(v)})`:f6(v);
+  if(r.type==='linear')
+    return `y = ${n(r.a)}\\,x + ${n(r.b)}`;
+  if(r.type==='exponential')
+    return `y = ${n(r.a)}\\cdot e^{${n(r.b)}x}`;
+  if(r.type==='polynomial')
+    return `y = ${n(r.a)}\\,x^2 + ${n(r.b)}\\,x + ${n(r.c)}`;
+  if(r.type==='logarithmic')
+    return `y = ${n(r.a)}\\cdot\\ln(x) + ${n(r.b)}`;
+  if(r.type==='gaussian')
+    return `y = ${n(r.a)}\\,\\exp\\!\\left(-\\dfrac{(x-${n(r.b)})^2}{2\\cdot${n(r.c)}^2}\\right) + ${n(r.d)}`;
+  if(r.type==='gaussian2'||r.type==='gaussian3'){
+    const nPeaks=r.nPeaks;
+    const parts=[];
+    for(let k=0;k<nPeaks;k++){
+      const A=r.params[k*3], mu=r.params[k*3+1], sig=r.params[k*3+2];
+      parts.push(`${n(A)}\\,\\exp\\!\\left(-\\dfrac{(x-${n(mu)})^2}{2\\cdot${n(sig)}^2}\\right)`);
+    }
+    return `y = ${parts.join(' + ')} + ${n(r.params[r.params.length-1])}`;
+  }
+  return r.eq;
+}
+
 function displayResults(r, used, total){
-  document.getElementById('resEq').textContent=r.eq;
-  // Zobraz obecný předpis šedě nad fitovaným
-  const elGen=document.getElementById('eq-general');
-  if(elGen) elGen.style.display='';
+  // Render fitted equation as KaTeX
+  const eqEl=document.getElementById('resEq');
+  if(eqEl){
+    try{ katex.render(resultToTex(r), eqEl, {throwOnError:false, displayMode:false}); }
+    catch(e){ eqEl.textContent=r.eq; }
+  }
   let html='';
   if(r.type==='gaussian'){
     html+=`• A = (${f6(r.a)} ± ${f6(r.seA)})<br>`
@@ -1276,7 +1325,7 @@ function parseAndFill(text){
   tb.innerHTML='';
   regressionOn=false;
   const _br=document.getElementById('btn-regrese'); if(_br){_br.style.color='var(--text)';_br.style.opacity='.6';_br.title='Spustit analýzu';}
-  document.getElementById('resEq').textContent='—'; document.getElementById('eq-general').style.display='';
+  const _eq=document.getElementById('resEq'); if(_eq) _eq.textContent='—';
   document.getElementById('resParams').textContent='';
 
   rows.forEach(([xv,yv],i)=>{
@@ -1451,7 +1500,7 @@ function clearData(){
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
   for(let i=0;i<6;i++) addRow();
-  document.getElementById('resEq').textContent='—'; document.getElementById('eq-general').style.display='';
+  const _eq=document.getElementById('resEq'); if(_eq) _eq.textContent='—';
   document.getElementById('resParams').textContent='';
   clearChart();
 }
