@@ -291,6 +291,8 @@ td input.cell:focus{
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">🗑️</button>
         <input type="file" id="file-input" accept=".txt,.csv,.tsv,.dat" style="display:none" onchange="loadFile(this)">
       </div>
+      <div id="file-label" style="font-size:10.5px;color:var(--text-muted);font-family:'Fira Code',monospace;
+           white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 2px;display:none;"></div>
       <div style="display:grid;grid-template-columns:32px 46px 1fr 1fr;gap:4px;padding:0 1px;">
         <div></div><div></div>
         <input id="label-x" type="text" placeholder="osa x" value="x"
@@ -1315,6 +1317,8 @@ function updateChart(result, x, y, excl){
 function loadFile(input){
   const file=input.files[0];
   if(!file) return;
+  const lbl=document.getElementById('file-label');
+  if(lbl){ lbl.textContent='📄 '+file.name; lbl.style.display='block'; }
   input.value='';
   const reader=new FileReader();
   reader.onload=e=>{ parseAndFill(e.target.result); };
@@ -1530,6 +1534,8 @@ function clearData(){
   const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
   if(lx) lx.value='x';
   if(ly) ly.value='y';
+  const lbl=document.getElementById('file-label');
+  if(lbl){ lbl.textContent=''; lbl.style.display='none'; }
   const _br=document.getElementById('btn-regrese'); if(_br){_br.style.color='var(--text)';_br.style.opacity='.6';_br.title='Spustit analýzu';}
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
