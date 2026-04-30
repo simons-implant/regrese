@@ -9,3 +9,5 @@ Aplikace umožňuje kromě ručního zadávání také nahrát data ve formátec
 Sloupce tabulky je možné prohodit tlačítkem `prohodit x ↔ y`, tím dojde k prohození os $(x_1 \leftrightarrow y_1,\ x_2 \leftrightarrow y_2,\ \ldots)$. Tlačítkem `uložit data` dojde k uložení dat tabulky ve formátu `.txt` a tlačítkem `smazat data` k jejich odstranění. Jsou-li v tabulce data a uživatel vloží tlačítkem `načíst soubor` nová data, dojde k přepsání starých.
 
 ## Vyhodnocení dat
+
+Symbolem ✅ jsou označeny ty řádky tabulky, na kterých se provádí regresní analýza. Při spuštění aplikace jsou takto označeny všechny řádky, přičemž je možné klikem myši libovolné řádky z účasti v regresi vyloučit.
