@@ -1,12 +1,4 @@
-<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='64' height='64'>
-  <rect width='32' height='32' rx='7' fill='#c83030'/>
-  <polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/>
-  <circle cx='10' cy='18' r='2' fill='white'/>
-  <circle cx='16' cy='20' r='2' fill='white'/>
-  <circle cx='22' cy='10' r='2' fill='white'/>
-  <line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/>
-  <line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/>
-</svg>
+<img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0naHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmcnIHZpZXdCb3g9JzAgMCAzMiAzMicgd2lkdGg9JzgwJyBoZWlnaHQ9JzgwJz48cmVjdCB3aWR0aD0nMzInIGhlaWdodD0nMzInIHJ4PSc3JyBmaWxsPScjYzgzMDMwJy8+PHBvbHlsaW5lIHBvaW50cz0nNCwyNiAxMCwxOCAxNiwyMCAyMiwxMCAyOCw2JyBmaWxsPSdub25lJyBzdHJva2U9J3doaXRlJyBzdHJva2Utd2lkdGg9JzIuOCcgc3Ryb2tlLWxpbmVjYXA9J3JvdW5kJyBzdHJva2UtbGluZWpvaW49J3JvdW5kJy8+PGNpcmNsZSBjeD0nMTAnIGN5PScxOCcgcj0nMicgZmlsbD0nd2hpdGUnLz48Y2lyY2xlIGN4PScxNicgY3k9JzIwJyByPScyJyBmaWxsPSd3aGl0ZScvPjxjaXJjbGUgY3g9JzIyJyBjeT0nMTAnIHI9JzInIGZpbGw9J3doaXRlJy8+PGxpbmUgeDE9JzQnIHgyPScyOCcgeTE9JzI4JyB5Mj0nMjgnIHN0cm9rZT0nd2hpdGUnIHN0cm9rZS13aWR0aD0nMS41JyBvcGFjaXR5PScwLjQnLz48bGluZSB4MT0nNCcgeDI9JzQnIHkxPSc0JyB5Mj0nMjgnIHN0cm9rZT0nd2hpdGUnIHN0cm9rZS13aWR0aD0nMS41JyBvcGFjaXR5PScwLjQnLz48L3N2Zz4=">
 
 # Regresní analýza
 
