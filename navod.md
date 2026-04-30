@@ -2,10 +2,6 @@
 
 # Regresní analýza
 
-## Obsah
-- [Vložení dat](#vložení-dat)
-- [Vyhodnocení dat](#vyhodnocení-dat)
-
 ## Vložení dat
 
 Data lze do tabulky zadat ručně kliknutím do příslušného políčka tabulky a napsáním/vložením čísla. Aplikace považuje za desetinnou čárku znaky `,` a `.`. Stisknutím klávesy `Enter` dojde automaticky k přeskočení do dalšího políčka tabulky. Tímto způsobem je možné bez použití myši postupně zadávat dvojice $(x_1, y_1), (x_2, y_2), \ldots$
