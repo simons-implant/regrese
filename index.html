@@ -292,7 +292,7 @@ td input.cell:focus{
 <body>
 <div class="app">
   <header class="topbar">
-    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v1.06</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span></div></div>
+    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v1.07</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span></div></div>
     <div class="spacer"></div>
     <button onclick="openNavod()"
       title="Návod k použití"
@@ -380,6 +380,7 @@ td input.cell:focus{
             <button class="rtype-option" onclick="selectRtype('gaussian',this)">Gauss</button>
             <button class="rtype-option" onclick="selectRtype('gaussian2',this)">2× Gauss</button>
             <button class="rtype-option" onclick="selectRtype('gaussian3',this)">3× Gauss</button>
+            <button class="rtype-option" onclick="selectRtype('rational',this)">Lomenná lineární (y = (ax+b)/(cx+d))</button>
           </div>
         </div>
 
@@ -438,6 +439,7 @@ td input.cell:focus{
         <option value="gaussian">Gauss</option>
         <option value="gaussian2">2× Gauss</option>
         <option value="gaussian3">3× Gauss</option>
+        <option value="rational">Lomenná lineární</option>
       </select>
 
       <div class="results-panel">
@@ -616,6 +618,35 @@ function doLogarithmic(x,y){
   return{type:'logarithmic',a,b,seA,seB,r2,yp,
          eq:`y = ${f6(a)}·ln(x) + ${f6(b)}`,
          smooth:xi=>a*Math.log(Math.max(xi,1e-10))+b};
+}
+
+function doRational(x,y){
+  if(x.length<3) throw new Error("Lomenná funkce vyžaduje alespoň 3 body.");
+  // y = (ax+b)/(cx+1) — 3 parametry, identifikovatelná forma (d=1 fixováno)
+  const {a:la,b:lb}=linRaw(x,y);
+  const p0=[la,lb,0];
+  const fn=(xi,[a,b,c])=>{
+    const denom=c*xi+1;
+    return Math.abs(denom)<1e-12 ? 1e12 : (a*xi+b)/denom;
+  };
+  const jac=(xi,[a,b,c])=>{
+    const denom=c*xi+1;
+    if(Math.abs(denom)<1e-12) return[0,0,0];
+    const num=a*xi+b;
+    const d2=denom*denom;
+    return[xi/denom, 1/denom, -num*xi/d2];
+  };
+  const pOpt=lmFit(x,y,p0,fn,jac,600,1e-10);
+  const [a,b,c]=pOpt;
+  if(x.some(xi=>Math.abs(c*xi+1)<1e-6))
+    throw new Error("Lomenná funkce má pól v oblasti dat — zkus jiný typ regrese.");
+  const yp=x.map(xi=>fn(xi,pOpt));
+  const r2=calcR2(y,yp);
+  const Xd=x.map(xi=>jac(xi,pOpt));
+  const [seA,seB,seC]=calcSE(Xd,y,yp,3);
+  return{type:'rational',a,b,c,seA,seB,seC,r2,yp,
+         eq:`y = (${f6(a)}x + ${f6(b)}) / (${f6(c)}x + 1)`,
+         smooth:xi=>fn(xi,pOpt)};
 }
 
 /* ── Gauss-Jordan solver (pro LM) ── */
@@ -984,7 +1015,8 @@ const GENERAL_TEX={
   logarithmic:  'y = a\\cdot\\ln(x) + b',
   gaussian:     'y = A\\,\\exp\\!\\left(-\\dfrac{(x-\\mu)^2}{2\\sigma^2}\\right) + c',
   gaussian2:    'y = A_1\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_1)^2}{2\\sigma_1^2}\\right) + A_2\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_2)^2}{2\\sigma_2^2}\\right) + c',
-  gaussian3:    'y = A_1\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_1)^2}{2\\sigma_1^2}\\right) + A_2\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_2)^2}{2\\sigma_2^2}\\right) + A_3\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_3)^2}{2\\sigma_3^2}\\right) + c'
+  gaussian3:    'y = A_1\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_1)^2}{2\\sigma_1^2}\\right) + A_2\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_2)^2}{2\\sigma_2^2}\\right) + A_3\\,\\exp\\!\\left(-\\dfrac{(x-\\mu_3)^2}{2\\sigma_3^2}\\right) + c',
+  rational:     'y = \\dfrac{ax + b}{cx + 1}'
 };
 
 function updateGeneralEq(){
@@ -1115,6 +1147,7 @@ function computeRegression(){
     else if(type==='gaussian')    result=doGaussian(x,y);
     else if(type==='gaussian2')   result=doMultiGaussian(x,y,2);
     else if(type==='gaussian3')   result=doMultiGaussian(x,y,3);
+    else if(type==='rational')    result=doRational(x,y);
   }catch(err){
     eqEl.innerHTML=`<span class="err">❗ ${err.message}</span>`;
     pmEl.innerHTML='';
@@ -1140,6 +1173,8 @@ function resultToTex(r){
     return `y = ${n(r.a)}\\,x^2 + ${n(r.b)}\\,x + ${n(r.c)}`;
   if(r.type==='logarithmic')
     return `y = ${n(r.a)}\\cdot\\ln(x) + ${n(r.b)}`;
+  if(r.type==='rational')
+    return `y = \\dfrac{${n(r.a)}\\,x + ${n(r.b)}}{${n(r.c)}\\,x + 1}`;
   if(r.type==='gaussian')
     return `y = ${n(r.a)}\\,\\exp\\!\\left(-\\dfrac{(x-${n(r.b)})^2}{2\\cdot${n(r.c)}^2}\\right) + ${n(r.d)}`;
   if(r.type==='gaussian2'||r.type==='gaussian3'){
@@ -1184,6 +1219,8 @@ function displayResults(r, used, total){
          +`• b = (${f6(r.b)} ± ${f6(r.seB)})<br>`;
     if(r.type==='polynomial')
       html+=`• c = (${f6(r.c)} ± ${f6(r.seC)})<br>`;
+    if(r.type==='rational')
+      html+=`• c = (${f6(r.c)} ± ${f6(r.seC)})<br>`;
   }
   html+=`• R² = <span class="r2">${r.r2.toFixed(6)}</span><br>`
        +`• Použito bodů: ${used} / ${total}`;
@@ -1223,7 +1260,8 @@ function updateChart(result, x, y, excl){
   if(showCI && result.yp){
     const n=x.length;
     const p = result.type==='polynomial'?3 : result.type==='gaussian'?4 :
-              result.type==='gaussian2'?7 : result.type==='gaussian3'?10 : 2;
+              result.type==='gaussian2'?7 : result.type==='gaussian3'?10 :
+              result.type==='rational'?3 : 2;
     const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
     // t kritická hodnota 95% — aproximace pro velká n → 1.96, pro malá přesnější
     const tCrit = n>30 ? 1.96 : n>10 ? 2.228 : 2.776;
@@ -1635,7 +1673,8 @@ function saveGraph(){
   if(showCI && result.yp){
     const n=x.length;
     const p = result.type==='polynomial'?3 : result.type==='gaussian'?4 :
-              result.type==='gaussian2'?7 : result.type==='gaussian3'?10 : 2;
+              result.type==='gaussian2'?7 : result.type==='gaussian3'?10 :
+              result.type==='rational'?3 : 2;
     const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
     const tCrit = n>30 ? 1.96 : n>10 ? 2.228 : 2.776;
     let ciUpper, ciLower;
@@ -1742,7 +1781,7 @@ function saveGraphSVG(){
   let ciSVG=null;
   if(ciVisible && result.yp){
     const n=x.length;
-    const p=result.type==='polynomial'?3:result.type==='gaussian'?4:result.type==='gaussian2'?7:result.type==='gaussian3'?10:2;
+    const p=result.type==='polynomial'?3:result.type==='gaussian'?4:result.type==='gaussian2'?7:result.type==='gaussian3'?10:result.type==='rational'?3:2;
     const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
     const tCrit=n>30?1.96:n>10?2.228:2.776;
     let upper,lower;
