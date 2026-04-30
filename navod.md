@@ -1,3 +1,5 @@
+![logo](https://raw.githubusercontent.com/simons-implant/regrese/main/logo.svg)
+
 # Regresní analýza
 
 ## Vložení dat
