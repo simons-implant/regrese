@@ -14,6 +14,6 @@ Symbolem ✅ jsou označeny ty řádky tabulky, na kterých se provádí regresn
 
 Kliknutním na tlačítko `typ regrese` se zobrazí rozbalovací nabídka, ve které je možné vybrat tvar fitované funkce. Po výběru se její obecný předpis vypíše v poli dole pod grafem. Zapnutí a vypnutí zobrazení fitované funkce v grafu se provede tlačítkem `spustit analýzu`. V pravém sloupci se zobrazí parametry fitování a v oblasti dole pod grafem se pod obecným předpisem fitované funkce zobrazí stejná s konkrétními parametry. Tlačítko `interval spolehlivosti` v grafu zobrazí 95% oblast spolehlivosti. Tlačítkem `uložit PNG` dojde k uložení grafu ve formátu PNG.
 
-Nad grafem se zobrazuje legenda, ve které mohou být celkem 3 pojmy: `data`, `fit` a `vyloučené body`. Kliknutím na libovolný údaj dojde ke zrušení zobrazování příslušných dat v grafu. Rozahy os se nastavují automaticky, ale je možné je nastavit manuálně prostřednictvím políček `x min`, `x max`, `y min` a `y max`. Kliknutím na tlačítko `reset os` dojde k opětovnému přepnutí na automatické nastavení.
+Nad grafem se zobrazuje legenda, ve které mohou být celkem 3 pojmy: `data` označují body, na kterých je prováděna regrese, `fit` je nafitovaná funkce a `vyloučeno (X)` jsou body vyloučené z regrese včetně jejich počtu v závorce.  Kliknutím na libovolný údaj dojde ke zrušení zobrazování příslušných dat v grafu. Rozahy os se nastavují automaticky, ale je možné je nastavit manuálně prostřednictvím políček `x min`, `x max`, `y min` a `y max`. Kliknutím na tlačítko `reset os` dojde k opětovnému přepnutí na automatické nastavení.
 
 
