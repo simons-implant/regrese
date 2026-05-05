@@ -2013,10 +2013,17 @@ function advParse(text){
   const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
   if(!lines.length) return null;
   const rows = lines.map(l=>advSplitLine(l));
-  // detekce záhlaví: první řádek má alespoň jeden nenumerický prvek
-  const first = rows[0];
-  const hasHeader = first.some(v => isNaN(v.replace(',','.')));
-  return { hasHeader, rows };
+  return { rows };
+}
+
+function advHasHeader(rows, orient){
+  if(orient === 'cols'){
+    // záhlaví = první řádek obsahuje aspoň jednu nenumerickou hodnotu
+    return rows[0].some(v => isNaN(v.replace(',','.')));
+  } else {
+    // záhlaví = první sloupec obsahuje aspoň jednu nenumerickou hodnotu
+    return rows.some(r => isNaN((r[0]||'').replace(',','.')));
+  }
 }
 
 function advGetOrient(){
@@ -2031,12 +2038,14 @@ function advRender(){
   updateAdvConfirm();
 
   const orient = advGetOrient();
-  const { hasHeader, rows } = advParsed;
+  const { rows } = advParsed;
+  const hasHeader = advHasHeader(rows, orient);
   const PREVIEW = 20;
   const tbl = document.getElementById('adv-table');
   tbl.innerHTML = '';
 
   if(orient === 'cols'){
+    document.getElementById('adv-hint').innerHTML = 'Klikni na záhlaví sloupce pro výběr jako <b>x</b> nebo <b>y</b>';
     // Sloupce: klikáme na záhlaví (th v prvním řádku)
     const colCount = Math.max(...rows.map(r=>r.length));
     const thead = tbl.createTHead();
@@ -2085,6 +2094,11 @@ function advRender(){
 
   } else {
     // Řádky: klikáme na první buňku řádku (záhlaví řádku)
+    const colCount = Math.max(...rows.map(r=>r.length));
+    const startCol = hasHeader ? 1 : 0;
+    const warnEl = document.getElementById('adv-hint');
+    warnEl.innerHTML = 'Klikni na záhlaví řádku pro výběr jako <b>x</b> nebo <b>y</b>';
+
     const tbody = tbl.createTBody();
     const shown = rows.slice(0, PREVIEW+1);
     shown.forEach((row, ri)=>{
@@ -2200,7 +2214,8 @@ function updateAdvConfirm(){
 function advConfirm(){
   if(advSelX === null || advSelY === null) return;
   const orient = advGetOrient();
-  const { hasHeader, rows } = advParsed;
+  const { rows } = advParsed;
+  const hasHeader = advHasHeader(rows, orient);
 
   let xVals=[], yVals=[], labelX='x', labelY='y';
 
