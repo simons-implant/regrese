@@ -20,4 +20,4 @@ Nad grafem se zobrazuje legenda, ve které mohou být celkem 4 pojmy: `Data` ozn
 
 ## Poznámky
 
-Verze `2.0` přínáší Fourierovskou analýzu a několik dalších vylepšení, enjoy. 🎉
+Verze `2.0` přínáší Fourierovskou analýzu a několik dalších vylepšení. Enjoy! 🎉
