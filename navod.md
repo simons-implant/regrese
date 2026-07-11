@@ -18,4 +18,6 @@ Kliknutím na tlačítko 📈`typ regrese` se zobrazí rozbalovací nabídka, ve
 
 Nad grafem se zobrazuje legenda, ve které mohou být celkem 4 pojmy: `Data` označují body, na kterých je prováděna regrese, `fit` je nafitovaná funkce, `Vyloučeno (X)` jsou body vyloučené z regrese včetně jejich počtu v závorce a `IS 95 %` je 95% interval spolehlivosti. Kliknutím na libovolný údaj dojde ke zrušení zobrazování příslušných dat v grafu. Rozsahy os se nastavují automaticky, ale je možné je nastavit manuálně prostřednictvím políček `x min`, `x max`, `y min` a `y max`. Kliknutím na tlačítko ⟳`reset os` dojde k opětovnému přepnutí na automatické nastavení.
 
+## Poznámky
 
+Verze `2.0` přínáší Fourierovskou analýzu a několik dalších vylepšení, enjoy. 🎉
