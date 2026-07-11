@@ -61,6 +61,25 @@ body{
   background:var(--surface);border:1px solid var(--border);
   border-radius:12px;padding:10px 16px;
   box-shadow:var(--shadow);
+  transition:border-color .25s;
+}
+.topbar.fourier-active{
+  background:linear-gradient(120deg,
+    rgba(200,48,48,0.04) 0%, rgba(200,48,48,0.22) 20%,
+    rgba(200,48,48,0.04) 40%, rgba(200,48,48,0.22) 60%,
+    rgba(200,48,48,0.04) 80%, rgba(200,48,48,0.22) 100%);
+  background-size:300% 100%;
+  border-color:#c83030;
+  animation:fourierSweep 9s ease-in-out infinite, fourierPulse 4s ease-in-out infinite;
+}
+@keyframes fourierSweep{
+  0%{background-position:0% 50%;}
+  50%{background-position:100% 50%;}
+  100%{background-position:0% 50%;}
+}
+@keyframes fourierPulse{
+  0%,100%{box-shadow:0 0 0 1px rgba(200,48,48,0.18), var(--shadow);}
+  50%{box-shadow:0 0 16px 3px rgba(200,48,48,0.4), var(--shadow);}
 }
 .app-title{font-size:17px;font-weight:700;white-space:nowrap;}
 .app-title span{color:var(--accent);}
@@ -343,7 +362,7 @@ td input.cell:focus{
 </head>
 <body>
 <div class="app">
-  <header class="topbar">
+  <header class="topbar" id="topBar">
     <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.0</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
     <div class="spacer"></div>
     <button onclick="openNavod()"
@@ -1154,7 +1173,7 @@ function updateFourierUI(isFourier){
   if(box) box.classList.toggle('fourier-active', isFourier);
   const panel=document.getElementById('fourier-settings');
   if(panel) panel.style.display=isFourier?'flex':'none';
-  ['tblWrap','resultsPanel','eqBar','graph-zoom-panel'].forEach(id=>{
+  ['tblWrap','resultsPanel','eqBar','graph-zoom-panel','topBar'].forEach(id=>{
     const el=document.getElementById(id);
     if(el) el.classList.toggle('fourier-active', isFourier);
   });
