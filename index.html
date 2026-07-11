@@ -1234,11 +1234,23 @@ function applyRange(){
     yMax: isNaN(yMax)?null:yMax
   };
   syncZoomPanFromRange(xMin, xMax);
-  // Zachovej viditelnost
-  const vis=chartInst?chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i)):[];
-  if(regressionOn) computeRegression(); else showPointsOnly();
-  if(chartInst) vis.forEach((v,i)=>{ if(!v) chartInst.hide(i); });
-  if(chartInst) chartInst.update();
+
+  if(!chartInst){
+    // Graf ještě neexistuje (např. úplně první vykreslení) — musí se postavit.
+    if(regressionOn) computeRegression(); else showPointsOnly();
+    return;
+  }
+
+  // Rychlá cesta: mění se jen zobrazený výřez os, ne data ani fit —
+  // stačí přenastavit meze os na už existujícím grafu, BEZ nového
+  // přefitování regrese a BEZ zbourání/znovupostavení celého grafu.
+  const xOpts=getScaleOpts('x'), yOpts=getScaleOpts('y');
+  const xs=chartInst.options.scales.x, ys=chartInst.options.scales.y;
+  if(xOpts.min!==undefined) xs.min=xOpts.min; else delete xs.min;
+  if(xOpts.max!==undefined) xs.max=xOpts.max; else delete xs.max;
+  if(yOpts.min!==undefined) ys.min=yOpts.min; else delete ys.min;
+  if(yOpts.max!==undefined) ys.max=yOpts.max; else delete ys.max;
+  chartInst.update('none');
   requestAnimationFrame(updateRangeInputs);
 }
 
