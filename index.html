@@ -126,6 +126,12 @@ select#rType:focus{border-color:var(--accent);}
   background:var(--surface);border:1px solid var(--border);
   border-radius:10px;padding:9px 14px;
   box-shadow:var(--shadow);overflow:hidden;
+  transition:background .25s,border-color .25s,box-shadow .25s;
+}
+.eq-bar.fourier-active{
+  background:linear-gradient(135deg, rgba(200,48,48,0.14), var(--surface) 55%);
+  border-color:#c83030;
+  box-shadow:0 0 0 1px rgba(200,48,48,0.25), var(--shadow);
 }
 .eq-general{
   font-size:14px;color:var(--text-muted);margin-bottom:6px;
@@ -195,6 +201,22 @@ select#rType:focus{border-color:var(--accent);}
   border-radius:10px;padding:11px 13px;font-size:13px;
   box-shadow:var(--shadow);display:flex;flex-direction:column;
   min-height:0;overflow-y:auto;
+  transition:background .25s,border-color .25s,box-shadow .25s;
+}
+.results-panel.fourier-active{
+  background:linear-gradient(135deg, rgba(200,48,48,0.14), var(--surface) 55%);
+  border-color:#c83030;
+  box-shadow:0 0 0 1px rgba(200,48,48,0.25), var(--shadow);
+}
+.graph-zoom-panel{
+  background:var(--surface);border:1px solid var(--border);
+  box-shadow:var(--shadow);
+  transition:background .25s,border-color .25s,box-shadow .25s;
+}
+.graph-zoom-panel.fourier-active{
+  background:linear-gradient(135deg, rgba(200,48,48,0.14), var(--surface) 55%);
+  border-color:#c83030;
+  box-shadow:0 0 0 1px rgba(200,48,48,0.25), var(--shadow);
 }
 
 .sec-label{
@@ -206,6 +228,12 @@ select#rType:focus{border-color:var(--accent);}
   flex:1;overflow-y:auto;border-radius:10px;
   border:1px solid var(--border);background:var(--surface);
   min-height:140px;
+  transition:background .25s,border-color .25s,box-shadow .25s;
+}
+.tbl-wrap.fourier-active{
+  background:linear-gradient(135deg, rgba(200,48,48,0.14), var(--surface) 55%);
+  border-color:#c83030;
+  box-shadow:0 0 0 1px rgba(200,48,48,0.25);
 }
 table{width:100%;border-collapse:collapse;}
 thead th{
@@ -367,7 +395,7 @@ td input.cell:focus{
                  border-radius:7px;padding:4px 8px;font-family:'Sora',sans-serif;font-size:12px;outline:none;min-width:0;"
           oninput="axisLabels.y=this.value.trim()||'y'; axisLabelsFromFile=true; if(chartInst){if(regressionOn)computeRegression();else showPointsOnly();}">
       </div>
-      <div class="tbl-wrap">
+      <div class="tbl-wrap" id="tblWrap">
         <table>
           <thead><tr><th>#</th><th><input type="checkbox" id="cb-all" checked onchange="toggleAll(this.checked)" title="Zaškrtnout/odškrtnout vše"></th><th>x</th><th>y</th></tr></thead>
           <tbody id="tbody"></tbody>
@@ -382,7 +410,7 @@ td input.cell:focus{
           <div class="sel-overlay" id="sel-overlay"></div>
         </div>
       </div>
-      <div class="eq-bar">
+      <div class="eq-bar" id="eqBar">
         <div id="eq-general" class="eq-general"></div>
         <div id="resEq" class="eq-fitted"></div>
       </div>
@@ -454,8 +482,7 @@ td input.cell:focus{
 
       <div class="graph-zoom-panel" id="graph-zoom-panel"
         style="display:flex;flex-direction:column;gap:7px;
-               background:var(--surface);border:1px solid var(--border);
-               border-radius:10px;padding:10px 12px;box-shadow:var(--shadow);">
+               border-radius:10px;padding:10px 12px;">
         <div style="display:flex;align-items:center;gap:8px;">
           <label style="font-size:12px;color:var(--text);white-space:nowrap;">Zoom:</label>
           <input type="range" id="graph-zoom-slider" min="5" max="100" step="1" value="100"
@@ -504,7 +531,7 @@ td input.cell:focus{
         <option value="fourier">Fourierova řada (nastavitelné harm.)</option>
       </select>
 
-      <div class="results-panel">
+      <div class="results-panel" id="resultsPanel">
         <div class="sec-label" style="margin-bottom:8px;">Regresní parametry:</div>
         <div class="res-params" id="resParams"></div>
       </div>
@@ -1127,6 +1154,10 @@ function updateFourierUI(isFourier){
   if(box) box.classList.toggle('fourier-active', isFourier);
   const panel=document.getElementById('fourier-settings');
   if(panel) panel.style.display=isFourier?'flex':'none';
+  ['tblWrap','resultsPanel','eqBar','graph-zoom-panel'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.classList.toggle('fourier-active', isFourier);
+  });
 }
 
 // Close dropdown when clicking outside
