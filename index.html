@@ -476,11 +476,50 @@ td input.cell:focus{
                border:1px solid #c83030;border-radius:10px;padding:10px 12px;box-shadow:var(--shadow);">
         <div class="sec-label" style="color:#c83030;white-space:nowrap;">🌊 Nastavení Fourierovy analýzy:</div>
         <div style="display:flex;align-items:center;gap:8px;">
+          <label style="font-size:12px;color:var(--text);white-space:nowrap;flex:1;">Harmonické automaticky:</label>
+          <div id="fourier-auto-track" onclick="toggleFourierAutoHarmonics()"
+            style="position:relative;width:38px;height:21px;border-radius:11px;cursor:pointer;
+                   background:#c83030;border:1px solid #c83030;transition:background .2s,border-color .2s;
+                   flex-shrink:0;">
+            <div id="fourier-auto-knob" style="position:absolute;top:1px;left:18px;width:17px;height:17px;
+                 border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);
+                 transition:left .2s;"></div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
           <label style="font-size:12px;color:var(--text);white-space:nowrap;">Harmonické:</label>
-          <input type="range" id="fourier-harmonics-slider" min="1" max="8" step="1" value="3"
-            style="flex:1;accent-color:#c83030;" oninput="setFourierHarmonics(this.value)">
+          <input type="range" id="fourier-harmonics-slider" min="1" max="8" step="1" value="3" disabled
+            style="flex:1;accent-color:#c83030;opacity:.45;cursor:not-allowed;" oninput="setFourierHarmonics(this.value)">
           <span id="fourier-harmonics-val"
             style="font-family:'Fira Code',monospace;font-size:13px;min-width:16px;text-align:center;color:var(--text);">3</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <label style="font-size:12px;color:var(--text);white-space:nowrap;flex:1;">Vlastní perioda:</label>
+          <div id="fourier-period-track" onclick="toggleFourierManualPeriod()"
+            style="position:relative;width:38px;height:21px;border-radius:11px;cursor:pointer;
+                   background:var(--btn);border:1px solid var(--border);transition:background .2s,border-color .2s;
+                   flex-shrink:0;">
+            <div id="fourier-period-knob" style="position:absolute;top:1px;left:1px;width:17px;height:17px;
+                 border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);
+                 transition:left .2s;"></div>
+          </div>
+        </div>
+        <div id="fourier-period-row" style="display:none;align-items:center;gap:8px;">
+          <label style="font-size:12px;color:var(--text);white-space:nowrap;">Perioda T =</label>
+          <input type="text" id="fourier-period-input" placeholder="např. 10"
+            style="flex:1;background:var(--btn);color:var(--text);border:1px solid var(--border);
+                   border-radius:7px;padding:4px 8px;font-family:'Fira Code',monospace;font-size:12.5px;outline:none;min-width:0;"
+            oninput="setFourierPeriod(this.value)">
+        </div>
+        <div style="display:flex;gap:6px;margin-top:2px;">
+          <button onclick="openPeriodogram()"
+            style="flex:1;background:var(--btn);color:var(--text);border:1px solid var(--border);
+                   border-radius:7px;padding:5px 4px;font-size:11px;cursor:pointer;font-family:'Sora',sans-serif;">
+            📊 periodogram</button>
+          <button onclick="openResiduals()"
+            style="flex:1;background:var(--btn);color:var(--text);border:1px solid var(--border);
+                   border-radius:7px;padding:5px 4px;font-size:11px;cursor:pointer;font-family:'Sora',sans-serif;">
+            📉 rezidua</button>
         </div>
       </div>
 
@@ -870,10 +909,88 @@ function linearFourierFit(x,y,w,nH){
   const XtY = Xt.map(row=>sum(row.map((v,j)=>v*y[j])));
   return solveGE(XtX, XtY); // [a0,a1,b1,a2,b2,a3,b3]
 }
-function doFourier(x,y,nH=3){
+function invertMatrixGJ(M){
+  const m=M.length;
+  const Minv=Array.from({length:m},(_,i)=>Array.from({length:m},(_,j)=>i===j?1:0));
+  const Mcopy=M.map(r=>[...r]);
+  for(let col=0;col<m;col++){
+    let maxRow=col;
+    for(let row=col+1;row<m;row++) if(Math.abs(Mcopy[row][col])>Math.abs(Mcopy[maxRow][col])) maxRow=row;
+    [Mcopy[col],Mcopy[maxRow]]=[Mcopy[maxRow],Mcopy[col]];
+    [Minv[col],Minv[maxRow]]=[Minv[maxRow],Minv[col]];
+    if(Math.abs(Mcopy[col][col])<1e-14) continue;
+    const sc=Mcopy[col][col];
+    for(let k=0;k<m;k++){Mcopy[col][k]/=sc; Minv[col][k]/=sc;}
+    for(let row=0;row<m;row++){
+      if(row===col) continue;
+      const f=Mcopy[row][col];
+      for(let k=0;k<m;k++){Mcopy[row][k]-=f*Mcopy[col][k]; Minv[row][k]-=f*Minv[col][k];}
+    }
+  }
+  return Minv;
+}
+
+function fourierHarmonicsInfo(nH, coefOrP, seArr){
+  // coefOrP: [a0, a1,b1, a2,b2, ...]; seArr: matching SE array (stejná délka jako coefOrP, bez ω na konci)
+  const out=[];
+  for(let k=1;k<=nH;k++){
+    const ak=coefOrP[1+2*(k-1)], bk=coefOrP[2+2*(k-1)];
+    const seAk=seArr[1+2*(k-1)], seBk=seArr[2+2*(k-1)];
+    const Rk=Math.sqrt(ak*ak+bk*bk);
+    const phik=Math.atan2(bk,ak);
+    let seRk=0, sePhik=0;
+    if(Rk>1e-12){
+      seRk=Math.sqrt((ak*ak*seAk*seAk + bk*bk*seBk*seBk))/Rk;
+      sePhik=Math.sqrt((bk*bk*seAk*seAk + ak*ak*seBk*seBk))/(Rk*Rk);
+    }
+    out.push({k,ak,bk,seAk,seBk,Rk,seRk,phik,sePhik});
+  }
+  return out;
+}
+
+function doFourier(x,y,nH=3,fixedPeriod=null){
   if(x.length<2*nH+3) throw new Error(`Fourierova řada (${nH} harm.) vyžaduje alespoň ${2*nH+3} bodů.`);
   const xSpan = Math.max(...x) - Math.min(...x);
   if(xSpan<=0) throw new Error("Fourierova řada vyžaduje rozptýlené x-hodnoty.");
+
+  // ── Varianta s ručně zadanou periodou: ω je pevné, fituje se pouze
+  //    lineárně (amplitudy), žádné hledání frekvence ani LM optimalizace ──
+  if(fixedPeriod && isFinite(fixedPeriod) && fixedPeriod>0){
+    const omega=2*Math.PI/fixedPeriod;
+    const coef=linearFourierFit(x,y,omega,nH);
+    if(coef.some(v=>!isFinite(v))) throw new Error("Fourierova řada se s touto periodou nedá spolehlivě fitovat — zkus jinou hodnotu.");
+    const yp=x.map(xi=>{
+      const row=fourierRow(xi,omega,nH);
+      return sum(row.map((v,j)=>v*coef[j]));
+    });
+    const r2=calcR2(y,yp);
+    const n=x.length, m=coef.length;
+    const Xd=x.map(xi=>fourierRow(xi,omega,nH));
+    const XtX=matMul(matT(Xd),Xd);
+    const s2=sum(y.map((v,i)=>(v-yp[i])**2))/Math.max(n-m,1);
+    const XtXinv=invertMatrixGJ(XtX);
+    const se=XtXinv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2)));
+    const covMatrix=XtXinv.map(row=>row.map(v=>v*s2));
+
+    const eqParts=[];
+    for(let k=1;k<=nH;k++){
+      const ak=coef[1+2*(k-1)], bk=coef[2+2*(k-1)];
+      eqParts.push(`${f6(ak)}·cos(${k}ωx) + ${f6(bk)}·sin(${k}ωx)`);
+    }
+
+    return{
+      type:'fourier', nH, params:[...coef, omega], se:[...se, 0],
+      omega, seOmega:0, period:fixedPeriod, sePeriod:0, r2, yp, periodFixed:true,
+      harmonics:fourierHarmonicsInfo(nH, coef, se),
+      covMatrix, jacFn:xi=>fourierRow(xi,omega,nH),
+      periodogram:null,
+      eq:`y = ${f6(coef[0])} + ${eqParts.join(' + ')}, ω = ${f6(omega)} (perioda zadána ručně)`,
+      smooth:xi=>{
+        const row=fourierRow(xi,omega,nH);
+        return sum(row.map((v,j)=>v*coef[j]));
+      }
+    };
+  }
 
   // Hledání dobrého počátečního odhadu ω: zkus kandidátní periody
   // (celý rozsah dat / m) a pro každou udělej lineární fit amplitud
@@ -883,6 +1000,8 @@ function doFourier(x,y,nH=3){
   // správnou frekvenci i u dat s mnoha periodami.
   const mMax=Math.max(10, Math.min(60, Math.floor(x.length/(2*nH))));
   let bestW=2*Math.PI/xSpan, bestCoef=null, bestSSE=Infinity;
+  const periodogram=[];
+  const SStot=sum(y.map(v=>(v-mean(y))**2))||1e-12;
   for(let m=1;m<=mMax;m++){
     const w = 2*Math.PI*m/xSpan;
     let coef;
@@ -893,9 +1012,12 @@ function doFourier(x,y,nH=3){
       return sum(row.map((v,j)=>v*coef[j]));
     });
     const sseTest=sum(y.map((v,i)=>(v-ypTest[i])**2));
+    const r2Test=1-sseTest/SStot;
+    periodogram.push({period:2*Math.PI/w, r2:r2Test});
     if(sseTest<bestSSE){ bestSSE=sseTest; bestW=w; bestCoef=coef; }
   }
   if(!bestCoef) bestCoef=[mean(y), ...Array(2*nH).fill(0)];
+  periodogram.sort((a,b)=>a.period-b.period);
 
   // p = [a0, a1,b1, a2,b2, a3,b3, omega]
   const p0=[...bestCoef, bestW];
@@ -934,23 +1056,9 @@ function doFourier(x,y,nH=3){
   const Jac=x.map(xi=>jac(xi,pOpt));
   const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j)=>s+j[a]*j[b],0)));
   const s2=yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-m,1);
-  const Minv=Array.from({length:m},(_,i)=>Array.from({length:m},(_,j)=>i===j?1:0));
-  const Mcopy=JtJ.map(r=>[...r]);
-  for(let col=0;col<m;col++){
-    let maxRow=col;
-    for(let row=col+1;row<m;row++) if(Math.abs(Mcopy[row][col])>Math.abs(Mcopy[maxRow][col])) maxRow=row;
-    [Mcopy[col],Mcopy[maxRow]]=[Mcopy[maxRow],Mcopy[col]];
-    [Minv[col],Minv[maxRow]]=[Minv[maxRow],Minv[col]];
-    if(Math.abs(Mcopy[col][col])<1e-14) continue;
-    const sc=Mcopy[col][col];
-    for(let k=0;k<m;k++){Mcopy[col][k]/=sc; Minv[col][k]/=sc;}
-    for(let row=0;row<m;row++){
-      if(row===col) continue;
-      const f=Mcopy[row][col];
-      for(let k=0;k<m;k++){Mcopy[row][k]-=f*Mcopy[col][k]; Minv[row][k]-=f*Minv[col][k];}
-    }
-  }
+  const Minv=invertMatrixGJ(JtJ);
   const se=Minv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2)));
+  const covMatrix=Minv.map(row=>row.map(v=>v*s2));
 
   const period=2*Math.PI/omega;
   const sePeriod=Math.abs(2*Math.PI/(omega*omega))*se[se.length-1];
@@ -963,9 +1071,28 @@ function doFourier(x,y,nH=3){
 
   return{
     type:'fourier', nH, params:pOpt, se, omega, seOmega:se[se.length-1], period, sePeriod, r2, yp,
+    harmonics:fourierHarmonicsInfo(nH, pOpt, se),
+    covMatrix, jacFn:xi=>jac(xi,pOpt),
+    periodogram, bestPeriod:period,
     eq:`y = ${f6(pOpt[0])} + ${eqParts.join(' + ')}, ω = ${f6(omega)}`,
     smooth:xi=>fn(xi,pOpt)
   };
+}
+
+function doFourierAuto(x,y,fixedPeriod=null){
+  const n=x.length;
+  const maxAllowed=Math.max(1, Math.min(8, Math.floor((n-3)/2)));
+  let best=null, bestBIC=Infinity;
+  for(let nH=1; nH<=maxAllowed; nH++){
+    let res;
+    try{ res=doFourier(x,y,nH,fixedPeriod); }catch(e){ continue; }
+    const k = fixedPeriod ? (1+2*nH) : (1+2*nH+1); // počet odhadovaných parametrů
+    const rss = sum(y.map((v,i)=>(v-res.yp[i])**2));
+    const bic = n*Math.log(Math.max(rss/n, 1e-12)) + k*Math.log(n);
+    if(bic<bestBIC){ bestBIC=bic; best=res; }
+  }
+  if(!best) throw new Error("Automatický výběr počtu harmonických selhal — zkus to ručně.");
+  return best;
 }
 
 /* ── Multi-Gaussian fit ── */
@@ -1165,6 +1292,54 @@ function setFourierHarmonics(val){
   const lbl=document.getElementById('fourier-harmonics-val');
   if(lbl) lbl.textContent=fourierHarmonics;
   updateGeneralEq();
+  recomputeKeepVis();
+}
+
+let fourierAutoHarmonics=true;
+let lastFourierResult=null;
+
+function toggleFourierAutoHarmonics(){
+  fourierAutoHarmonics=!fourierAutoHarmonics;
+  const track=document.getElementById('fourier-auto-track');
+  const knob=document.getElementById('fourier-auto-knob');
+  const slider=document.getElementById('fourier-harmonics-slider');
+  if(track){
+    track.style.background=fourierAutoHarmonics?'#c83030':'var(--btn)';
+    track.style.borderColor=fourierAutoHarmonics?'#c83030':'var(--border)';
+  }
+  if(knob) knob.style.left=fourierAutoHarmonics?'18px':'1px';
+  if(slider){
+    slider.disabled=fourierAutoHarmonics;
+    slider.style.opacity=fourierAutoHarmonics?'.45':'1';
+    slider.style.cursor=fourierAutoHarmonics?'not-allowed':'pointer';
+  }
+  recomputeKeepVis();
+}
+
+let fourierManualPeriodOn=false;
+let fourierManualPeriod=null;
+
+function toggleFourierManualPeriod(){
+  fourierManualPeriodOn=!fourierManualPeriodOn;
+  const track=document.getElementById('fourier-period-track');
+  const knob=document.getElementById('fourier-period-knob');
+  const row=document.getElementById('fourier-period-row');
+  if(track) track.style.background=fourierManualPeriodOn?'#c83030':'var(--btn)';
+  if(track) track.style.borderColor=fourierManualPeriodOn?'#c83030':'var(--border)';
+  if(knob) knob.style.left=fourierManualPeriodOn?'18px':'1px';
+  if(row) row.style.display=fourierManualPeriodOn?'flex':'none';
+  if(!fourierManualPeriodOn){
+    fourierManualPeriod=null;
+    recomputeKeepVis();
+  } else {
+    const input=document.getElementById('fourier-period-input');
+    setFourierPeriod(input?input.value:'');
+  }
+}
+
+function setFourierPeriod(val){
+  const p=parseFloat(String(val).replace(',','.'));
+  fourierManualPeriod=(fourierManualPeriodOn && isFinite(p) && p>0)?p:null;
   recomputeKeepVis();
 }
 
@@ -1493,7 +1668,19 @@ function computeRegression(){
     else if(type==='gaussian2')   result=doMultiGaussian(x,y,2);
     else if(type==='gaussian3')   result=doMultiGaussian(x,y,3);
     else if(type==='rational')    result=doRational(x,y);
-    else if(type==='fourier')     result=doFourier(x,y,fourierHarmonics);
+    else if(type==='fourier'){
+      if(fourierAutoHarmonics){
+        result=doFourierAuto(x,y,fourierManualPeriod);
+        fourierHarmonics=result.nH;
+        const slider=document.getElementById('fourier-harmonics-slider');
+        if(slider) slider.value=fourierHarmonics;
+        const lbl=document.getElementById('fourier-harmonics-val');
+        if(lbl) lbl.textContent=fourierHarmonics;
+      } else {
+        result=doFourier(x,y,fourierHarmonics, fourierManualPeriod);
+      }
+      lastFourierResult=result;
+    }
   }catch(err){
     eqEl.innerHTML=`<span class="err">❗ ${err.message}</span>`;
     pmEl.innerHTML='';
@@ -1573,14 +1760,20 @@ function displayResults(r, used, total){
     html+=`• a₀ = (${f6(r.params[0])} ± ${f6(r.se[0])})<br>`;
     html+=`<hr style="${hrStyle}">`;
     for(let k=1;k<=r.nH;k++){
-      const ak=r.params[1+2*(k-1)], bk=r.params[2+2*(k-1)];
-      const seAk=r.se[1+2*(k-1)], seBk=r.se[2+2*(k-1)];
-      html+=`• a${k} = (${f6(ak)} ± ${f6(seAk)})<br>`
-           +`• b${k} = (${f6(bk)} ± ${f6(seBk)})<br>`;
+      const h=r.harmonics[k-1];
+      html+=`• a${k} = (${f6(h.ak)} ± ${f6(h.seAk)})<br>`
+           +`• b${k} = (${f6(h.bk)} ± ${f6(h.seBk)})<br>`
+           +`• R${k} = (${f6(h.Rk)} ± ${f6(h.seRk)})<br>`
+           +`• φ${k} = (${f6(h.phik)} ± ${f6(h.sePhik)}) rad<br>`;
       html+=`<hr style="${hrStyle}">`;
     }
-    html+=`• ω = (${f6(r.omega)} ± ${f6(r.seOmega)}) rad<br>`
-         +`• Perioda T = (${f6(r.period)} ± ${f6(r.sePeriod)})<br>`;
+    if(r.periodFixed){
+      html+=`• ω = ${f6(r.omega)} rad (pevné)<br>`
+           +`• Perioda T = ${f6(r.period)} (zadáno ručně)<br>`;
+    } else {
+      html+=`• ω = (${f6(r.omega)} ± ${f6(r.seOmega)}) rad<br>`
+           +`• Perioda T = (${f6(r.period)} ± ${f6(r.sePeriod)})<br>`;
+    }
   } else {
     html+=`• a = (${f6(r.a)} ± ${f6(r.seA)})<br>`
          +`• b = (${f6(r.b)} ± ${f6(r.seB)})<br>`;
@@ -1639,8 +1832,20 @@ function updateChart(result, x, y, excl){
       const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
       ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
       ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
+    } else if(result.type==='fourier' && result.covMatrix && result.jacFn){
+      // Přesný pás založený na kovarianční matici parametrů (delta metoda):
+      // SE_y(x) = sqrt( jac(x)^T · Cov · jac(x) ) — užší uprostřed dat, širší na okrajích
+      const cov=result.covMatrix;
+      const seY=xSmooth.map(xi=>{
+        const jv=result.jacFn(xi);
+        let s2=0;
+        for(let i=0;i<jv.length;i++) for(let j=0;j<jv.length;j++) s2+=jv[i]*cov[i][j]*jv[j];
+        return Math.sqrt(Math.max(0,s2));
+      });
+      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*seY[i]}));
+      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*seY[i]}));
     } else {
-      // Přibližný uniformní pás pro nelineární regrese
+      // Přibližný uniformní pás pro ostatní nelineární regrese
       ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse}));
       ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse}));
     }
@@ -2050,6 +2255,16 @@ function saveGraph(){
       const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
       ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
       ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
+    } else if(result.type==='fourier' && result.covMatrix && result.jacFn){
+      const cov=result.covMatrix;
+      const seY=xSmooth.map(xi=>{
+        const jv=result.jacFn(xi);
+        let s2=0;
+        for(let i=0;i<jv.length;i++) for(let j=0;j<jv.length;j++) s2+=jv[i]*cov[i][j]*jv[j];
+        return Math.sqrt(Math.max(0,s2));
+      });
+      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*seY[i]}));
+      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*seY[i]}));
     } else {
       ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse}));
       ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse}));
@@ -2157,6 +2372,16 @@ function saveGraphSVG(){
       const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
       upper=xSmooth.map((xi,i)=>[xi,ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)]);
       lower=xSmooth.map((xi,i)=>[xi,ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)]);
+    } else if(result.type==='fourier' && result.covMatrix && result.jacFn){
+      const cov=result.covMatrix;
+      const seY=xSmooth.map(xi=>{
+        const jv=result.jacFn(xi);
+        let s2=0;
+        for(let i=0;i<jv.length;i++) for(let j=0;j<jv.length;j++) s2+=jv[i]*cov[i][j]*jv[j];
+        return Math.sqrt(Math.max(0,s2));
+      });
+      upper=xSmooth.map((xi,i)=>[xi,ySmooth[i]+tCrit*seY[i]]);
+      lower=xSmooth.map((xi,i)=>[xi,ySmooth[i]-tCrit*seY[i]]);
     } else {
       upper=xSmooth.map((xi,i)=>[xi,ySmooth[i]+tCrit*rmse]);
       lower=xSmooth.map((xi,i)=>[xi,ySmooth[i]-tCrit*rmse]);
@@ -2303,6 +2528,124 @@ function openNavod() {
 function closeNavod() {
   document.getElementById('navod-overlay').style.display = 'none';
   document.body.style.overflow = '';
+}
+
+let periodogramChart=null, residualsChart=null;
+
+function openPeriodogram(){
+  const overlay=document.getElementById('periodogram-overlay');
+  const emptyMsg=document.getElementById('periodogram-empty');
+  const canvas=document.getElementById('periodogram-canvas');
+  overlay.style.display='flex';
+  document.body.style.overflow='hidden';
+
+  const r=lastFourierResult;
+  if(periodogramChart){ periodogramChart.destroy(); periodogramChart=null; }
+
+  if(!r || !r.periodogram || !r.periodogram.length){
+    canvas.style.display='none';
+    emptyMsg.style.display='block';
+    return;
+  }
+  canvas.style.display='block';
+  emptyMsg.style.display='none';
+
+  const c=chartColors();
+  const bestPeriod=r.period;
+  // Najdi bod v periodogramu nejblíž skutečně vybrané periodě (ta může
+  // být po LM doladění mírně jiná než testovaný kandidát), ať se bod
+  // vykreslí přesně na křivce a se správnou hodnotou R².
+  let nearest=r.periodogram[0];
+  for(const p of r.periodogram){
+    if(Math.abs(p.period-bestPeriod)<Math.abs(nearest.period-bestPeriod)) nearest=p;
+  }
+  const r2Vals=r.periodogram.map(p=>p.r2);
+  const yMin=Math.min(...r2Vals), yMax=Math.max(...r2Vals);
+
+  periodogramChart=new Chart(canvas.getContext('2d'), {
+    type:'line',
+    data:{
+      datasets:[
+        {
+          label:'R²',
+          data:r.periodogram.map(p=>({x:p.period,y:p.r2})),
+          borderColor:'#c83030',backgroundColor:'rgba(200,48,48,0.12)',
+          borderWidth:2,pointRadius:0,fill:true,tension:.15,order:3
+        },
+        {
+          type:'line',label:`vybráno: T ≈ ${f6(bestPeriod)}`,
+          data:[{x:nearest.period,y:yMin},{x:nearest.period,y:yMax}],
+          borderColor:'#4a9eff',borderWidth:2,borderDash:[6,4],pointRadius:0,fill:false,order:1
+        },
+        {
+          label:'vybraná perioda',
+          type:'scatter',
+          data:[{x:nearest.period, y:nearest.r2}],
+          backgroundColor:'#c83030',borderColor:'#fff',borderWidth:2,pointRadius:7,pointStyle:'circle',order:0
+        }
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      scales:{
+        x:{type:'linear',title:{display:true,text:'Perioda',color:c.text},ticks:{color:c.text},grid:{color:c.grid}},
+        y:{title:{display:true,text:'R²',color:c.text},ticks:{color:c.text},grid:{color:c.grid}}
+      },
+      plugins:{legend:{labels:{color:c.text,usePointStyle:true,pointStyle:'circle'}}}
+    }
+  });
+}
+
+function closePeriodogram(){
+  document.getElementById('periodogram-overlay').style.display='none';
+  document.body.style.overflow='';
+}
+
+function openResiduals(){
+  const overlay=document.getElementById('residuals-overlay');
+  const canvas=document.getElementById('residuals-canvas');
+  overlay.style.display='flex';
+  document.body.style.overflow='hidden';
+
+  const r=lastFourierResult;
+  if(residualsChart){ residualsChart.destroy(); residualsChart=null; }
+  if(!r || !r.yp){ return; }
+
+  const {x,y}=getTableData();
+  const resid=x.map((xi,i)=>({x:xi,y:y[i]-r.yp[i]}));
+  const xMin=Math.min(...x), xMax=Math.max(...x);
+  const c=chartColors();
+
+  residualsChart=new Chart(canvas.getContext('2d'), {
+    type:'scatter',
+    data:{
+      datasets:[
+        {
+          label:'rezidua',
+          data:resid,
+          backgroundColor:'#4a9eff',borderColor:'rgba(255,255,255,.7)',borderWidth:1.5,pointRadius:5
+        },
+        {
+          type:'line',label:'nula',
+          data:[{x:xMin,y:0},{x:xMax,y:0}],
+          borderColor:'rgba(200,48,48,.6)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,fill:false
+        }
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      scales:{
+        x:{type:'linear',title:{display:true,text:axisLabels.x,color:c.text},ticks:{color:c.text},grid:{color:c.grid}},
+        y:{title:{display:true,text:'naměřeno − fit',color:c.text},ticks:{color:c.text},grid:{color:c.grid}}
+      },
+      plugins:{legend:{labels:{color:c.text,usePointStyle:true,pointStyle:'circle'}}}
+    }
+  });
+}
+
+function closeResiduals(){
+  document.getElementById('residuals-overlay').style.display='none';
+  document.body.style.overflow='';
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeNavod(); });
@@ -2666,6 +3009,47 @@ updateGeneralEq();
     <div id="navod-content"
       style="overflow-y:auto;padding:24px 28px;color:var(--text);font-size:14px;line-height:1.7;font-family:'Sora',sans-serif;">
       <p style="color:var(--text-muted);text-align:center;">Načítám dokumentaci…</p>
+    </div>
+  </div>
+</div>
+
+<!-- PERIODOGRAM -->
+<div id="periodogram-overlay" onclick="if(event.target===this)closePeriodogram()"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:880px;max-height:90vh;
+             display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.35);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <span style="font-size:15px;font-weight:600;color:var(--text);">📊 Periodogram</span>
+      <button onclick="closePeriodogram()" style="background:transparent;border:none;cursor:pointer;font-size:20px;color:var(--text-muted);line-height:1;padding:0 4px;"
+        onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-muted)'">×</button>
+    </div>
+    <div style="padding:12px 20px;font-size:12px;color:var(--text-muted);font-family:'Sora',sans-serif;border-bottom:1px solid var(--border);">
+      Kvalita fitu (R²) pro jednotlivé testované periody. Vybraná perioda je zvýrazněná.
+    </div>
+    <div style="padding:16px 20px;flex:1;min-height:480px;position:relative;">
+      <canvas id="periodogram-canvas"></canvas>
+      <p id="periodogram-empty" style="display:none;color:var(--text-muted);text-align:center;margin-top:40px;">
+        Periodogram není k dispozici — perioda je zadaná ručně, takže se žádné frekvence netestují.
+      </p>
+    </div>
+  </div>
+</div>
+
+<!-- REZIDUA -->
+<div id="residuals-overlay" onclick="if(event.target===this)closeResiduals()"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:880px;max-height:90vh;
+             display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.35);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <span style="font-size:15px;font-weight:600;color:var(--text);">📉 Graf reziduí</span>
+      <button onclick="closeResiduals()" style="background:transparent;border:none;cursor:pointer;font-size:20px;color:var(--text-muted);line-height:1;padding:0 4px;"
+        onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-muted)'">×</button>
+    </div>
+    <div style="padding:12px 20px;font-size:12px;color:var(--text-muted);font-family:'Sora',sans-serif;border-bottom:1px solid var(--border);">
+      Rozdíly (naměřeno − fit) pro každý bod. Náhodný rozptyl kolem nuly bez vzoru značí dobrý fit.
+    </div>
+    <div style="padding:16px 20px;flex:1;min-height:480px;">
+      <canvas id="residuals-canvas"></canvas>
     </div>
   </div>
 </div>
