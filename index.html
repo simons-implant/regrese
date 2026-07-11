@@ -115,6 +115,12 @@ select#rType:focus{border-color:var(--accent);}
   border-radius:12px;padding:14px;
   display:flex;align-items:stretch;justify-content:center;
   min-height:0;box-shadow:var(--shadow);
+  transition:background .25s,border-color .25s,box-shadow .25s;
+}
+.chart-box.fourier-active{
+  background:linear-gradient(135deg, rgba(200,48,48,0.14), var(--surface) 55%);
+  border-color:#c83030;
+  box-shadow:0 0 0 1px rgba(200,48,48,0.25), var(--shadow);
 }
 .eq-bar{
   background:var(--surface);border:1px solid var(--border);
@@ -164,6 +170,26 @@ select#rType:focus{border-color:var(--accent);}
 }
 .rtype-option:hover{background:var(--btn-h);}
 .rtype-option.selected{color:var(--accent);font-weight:600;}
+.rtype-option.special{
+  position:relative;
+  background:linear-gradient(90deg, rgba(200,48,48,0.12), rgba(200,48,48,0.02));
+  border-left:3px solid #c83030;
+  font-weight:600;
+}
+.rtype-option.special:hover{background:linear-gradient(90deg, rgba(200,48,48,0.22), rgba(200,48,48,0.06));}
+.rtype-option.special.selected{color:#c83030;}
+.rtype-option.special::after{
+  content:'NOVÉ';
+  float:right;
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:.04em;
+  background:#c83030;
+  color:#fff;
+  padding:2px 6px;
+  border-radius:6px;
+  margin-left:8px;
+}
 .results-panel{
   flex:1;background:var(--surface);border:1px solid var(--border);
   border-radius:10px;padding:11px 13px;font-size:13px;
@@ -290,7 +316,7 @@ td input.cell:focus{
 <body>
 <div class="app">
   <header class="topbar">
-    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v1.15</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
+    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.0</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
     <div class="spacer"></div>
     <button onclick="openNavod()"
       title="Návod k použití"
@@ -350,7 +376,7 @@ td input.cell:focus{
     </div>
 
     <div class="chart-area">
-      <div class="chart-box">
+      <div class="chart-box" id="chartBox">
         <div class="chart-wrap">
           <canvas id="myChart"></canvas>
           <div class="sel-overlay" id="sel-overlay"></div>
@@ -383,6 +409,7 @@ td input.cell:focus{
             <button class="rtype-option" onclick="selectRtype('gaussian2',this)">2× Gauss</button>
             <button class="rtype-option" onclick="selectRtype('gaussian3',this)">3× Gauss</button>
             <button class="rtype-option" onclick="selectRtype('rational',this)">Lomená lineární (y = (ax+b)/(cx+1))</button>
+            <button class="rtype-option special" onclick="selectRtype('fourier',this)">Fourierova řada (nastavitelné harm.)</button>
           </div>
         </div>
 
@@ -394,6 +421,20 @@ td input.cell:focus{
           style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">▶️<span class="btn-lbl">spustit<br>analýzu</span></button>
 
+      </div>
+
+      <div class="fourier-settings-panel" id="fourier-settings"
+        style="display:none;flex-direction:column;gap:7px;
+               background:linear-gradient(135deg, rgba(200,48,48,0.10), var(--surface) 55%);
+               border:1px solid #c83030;border-radius:10px;padding:10px 12px;box-shadow:var(--shadow);">
+        <div class="sec-label" style="color:#c83030;white-space:nowrap;">🌊 Nastavení Fourierovy analýzy:</div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <label style="font-size:12px;color:var(--text);white-space:nowrap;">Harmonické:</label>
+          <input type="range" id="fourier-harmonics-slider" min="1" max="8" step="1" value="3"
+            style="flex:1;accent-color:#c83030;" oninput="setFourierHarmonics(this.value)">
+          <span id="fourier-harmonics-val"
+            style="font-family:'Fira Code',monospace;font-size:13px;min-width:16px;text-align:center;color:var(--text);">3</span>
+        </div>
       </div>
 
       <div class="sec-label" style="white-space:nowrap;margin-top:4px;">Nastavení grafu:</div>
@@ -409,6 +450,24 @@ td input.cell:focus{
           style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">💾<span class="btn-lbl">uložit<br>PNG</span></button>
 
+      </div>
+
+      <div class="graph-zoom-panel" id="graph-zoom-panel"
+        style="display:flex;flex-direction:column;gap:7px;
+               background:var(--surface);border:1px solid var(--border);
+               border-radius:10px;padding:10px 12px;box-shadow:var(--shadow);">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <label style="font-size:12px;color:var(--text);white-space:nowrap;">Zoom:</label>
+          <input type="range" id="graph-zoom-slider" min="5" max="100" step="1" value="100"
+            style="flex:1;" oninput="setGraphZoom(this.value)">
+          <span id="graph-zoom-val"
+            style="font-family:'Fira Code',monospace;font-size:13px;min-width:36px;text-align:center;color:var(--text);">100%</span>
+        </div>
+        <div id="graph-pan-row" style="display:none;align-items:center;gap:8px;">
+          <label style="font-size:12px;color:var(--text);white-space:nowrap;">Posun:</label>
+          <input type="range" id="graph-pan-slider" min="0" max="100" step="1" value="0"
+            style="flex:1;" oninput="setGraphPan(this.value)">
+        </div>
       </div>
 
       <!-- Rozsahy os -->
@@ -442,6 +501,7 @@ td input.cell:focus{
         <option value="gaussian2">2× Gauss</option>
         <option value="gaussian3">3× Gauss</option>
         <option value="rational">Lomenná lineární</option>
+        <option value="fourier">Fourierova řada (nastavitelné harm.)</option>
       </select>
 
       <div class="results-panel">
@@ -751,6 +811,117 @@ function doGaussian(x,y){
   };
 }
 
+/* ── Fourierova řada (3 harmonické) ── */
+function fourierRow(xi, w, nH){
+  const row=[1];
+  for(let k=1;k<=nH;k++){ row.push(Math.cos(k*w*xi), Math.sin(k*w*xi)); }
+  return row;
+}
+function linearFourierFit(x,y,w,nH){
+  const Xd = x.map(xi=>fourierRow(xi,w,nH));
+  const Xt = matT(Xd);
+  const XtX = matMul(Xt,Xd);
+  const XtY = Xt.map(row=>sum(row.map((v,j)=>v*y[j])));
+  return solveGE(XtX, XtY); // [a0,a1,b1,a2,b2,a3,b3]
+}
+function doFourier(x,y,nH=3){
+  if(x.length<2*nH+3) throw new Error(`Fourierova řada (${nH} harm.) vyžaduje alespoň ${2*nH+3} bodů.`);
+  const xSpan = Math.max(...x) - Math.min(...x);
+  if(xSpan<=0) throw new Error("Fourierova řada vyžaduje rozptýlené x-hodnoty.");
+
+  // Hledání dobrého počátečního odhadu ω: zkus kandidátní periody
+  // (celý rozsah dat / m) a pro každou udělej lineární fit amplitud
+  // při pevném ω; vyber tu s nejnižší reziduální sumou čtverců.
+  // Horní mez m je omezena hustotou dat (Nyquist pro 3. harmonickou —
+  // potřebujeme aspoň ~2 body na nejrychlejší kmit), aby šlo najít
+  // správnou frekvenci i u dat s mnoha periodami.
+  const mMax=Math.max(10, Math.min(60, Math.floor(x.length/(2*nH))));
+  let bestW=2*Math.PI/xSpan, bestCoef=null, bestSSE=Infinity;
+  for(let m=1;m<=mMax;m++){
+    const w = 2*Math.PI*m/xSpan;
+    let coef;
+    try{ coef=linearFourierFit(x,y,w,nH); }catch(e){ continue; }
+    if(coef.some(v=>!isFinite(v))) continue;
+    const ypTest=x.map(xi=>{
+      const row=fourierRow(xi,w,nH);
+      return sum(row.map((v,j)=>v*coef[j]));
+    });
+    const sseTest=sum(y.map((v,i)=>(v-ypTest[i])**2));
+    if(sseTest<bestSSE){ bestSSE=sseTest; bestW=w; bestCoef=coef; }
+  }
+  if(!bestCoef) bestCoef=[mean(y), ...Array(2*nH).fill(0)];
+
+  // p = [a0, a1,b1, a2,b2, a3,b3, omega]
+  const p0=[...bestCoef, bestW];
+
+  const fn=(xi,p)=>{
+    const w=p[p.length-1];
+    let s=p[0];
+    for(let k=1;k<=nH;k++){
+      const ak=p[1+2*(k-1)], bk=p[2+2*(k-1)];
+      s += ak*Math.cos(k*w*xi) + bk*Math.sin(k*w*xi);
+    }
+    return s;
+  };
+  const jac=(xi,p)=>{
+    const w=p[p.length-1];
+    const grad=new Array(p.length).fill(0);
+    grad[0]=1;
+    let dOmega=0;
+    for(let k=1;k<=nH;k++){
+      const ak=p[1+2*(k-1)], bk=p[2+2*(k-1)];
+      const c=Math.cos(k*w*xi), s=Math.sin(k*w*xi);
+      grad[1+2*(k-1)]=c;
+      grad[2+2*(k-1)]=s;
+      dOmega += -ak*k*xi*s + bk*k*xi*c;
+    }
+    grad[grad.length-1]=dOmega;
+    return grad;
+  };
+
+  const pOpt=lmFit(x,y,p0,fn,jac,800,1e-12);
+  const omega=pOpt[pOpt.length-1];
+  const yp=x.map(xi=>fn(xi,pOpt));
+  const r2=calcR2(y,yp);
+
+  const m=p0.length, n=x.length;
+  const Jac=x.map(xi=>jac(xi,pOpt));
+  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j)=>s+j[a]*j[b],0)));
+  const s2=yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-m,1);
+  const Minv=Array.from({length:m},(_,i)=>Array.from({length:m},(_,j)=>i===j?1:0));
+  const Mcopy=JtJ.map(r=>[...r]);
+  for(let col=0;col<m;col++){
+    let maxRow=col;
+    for(let row=col+1;row<m;row++) if(Math.abs(Mcopy[row][col])>Math.abs(Mcopy[maxRow][col])) maxRow=row;
+    [Mcopy[col],Mcopy[maxRow]]=[Mcopy[maxRow],Mcopy[col]];
+    [Minv[col],Minv[maxRow]]=[Minv[maxRow],Minv[col]];
+    if(Math.abs(Mcopy[col][col])<1e-14) continue;
+    const sc=Mcopy[col][col];
+    for(let k=0;k<m;k++){Mcopy[col][k]/=sc; Minv[col][k]/=sc;}
+    for(let row=0;row<m;row++){
+      if(row===col) continue;
+      const f=Mcopy[row][col];
+      for(let k=0;k<m;k++){Mcopy[row][k]-=f*Mcopy[col][k]; Minv[row][k]-=f*Minv[col][k];}
+    }
+  }
+  const se=Minv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2)));
+
+  const period=2*Math.PI/omega;
+  const sePeriod=Math.abs(2*Math.PI/(omega*omega))*se[se.length-1];
+
+  const eqParts=[];
+  for(let k=1;k<=nH;k++){
+    const ak=pOpt[1+2*(k-1)], bk=pOpt[2+2*(k-1)];
+    eqParts.push(`${f6(ak)}·cos(${k}ωx) + ${f6(bk)}·sin(${k}ωx)`);
+  }
+
+  return{
+    type:'fourier', nH, params:pOpt, se, omega, seOmega:se[se.length-1], period, sePeriod, r2, yp,
+    eq:`y = ${f6(pOpt[0])} + ${eqParts.join(' + ')}, ω = ${f6(omega)}`,
+    smooth:xi=>fn(xi,pOpt)
+  };
+}
+
 /* ── Multi-Gaussian fit ── */
 function doMultiGaussian(x, y, nPeaks){
   if(x.length < 5*nPeaks) throw new Error(`Fit ${nPeaks}× Gauss vyžaduje alespoň ${5*nPeaks} bodů.`);
@@ -937,8 +1108,25 @@ function selectRtype(value, btn){
   btn.classList.add('selected');
   // Close dropdown
   document.getElementById('rtype-dropdown').classList.remove('open');
+  updateFourierUI(value==='fourier');
   updateGeneralEq();
   recomputeKeepVis();
+}
+
+let fourierHarmonics=3;
+function setFourierHarmonics(val){
+  fourierHarmonics=parseInt(val,10)||3;
+  const lbl=document.getElementById('fourier-harmonics-val');
+  if(lbl) lbl.textContent=fourierHarmonics;
+  updateGeneralEq();
+  recomputeKeepVis();
+}
+
+function updateFourierUI(isFourier){
+  const box=document.getElementById('chartBox');
+  if(box) box.classList.toggle('fourier-active', isFourier);
+  const panel=document.getElementById('fourier-settings');
+  if(panel) panel.style.display=isFourier?'flex':'none';
 }
 
 // Close dropdown when clicking outside
@@ -948,6 +1136,90 @@ document.addEventListener('click',e=>{
     document.getElementById('rtype-dropdown')?.classList.remove('open');
   }
 });
+
+function getFullXRange(){
+  const {x,excl}=getTableData();
+  const allX=[...x,...excl.map(p=>p[0])];
+  if(!allX.length) return null;
+  return {min:Math.min(...allX), max:Math.max(...allX)};
+}
+
+let graphZoomPct=100, graphPanPct=0;
+
+function applyGraphZoomPan(){
+  const panRow=document.getElementById('graph-pan-row');
+  const range=getFullXRange();
+  if(!range || graphZoomPct>=100){
+    if(panRow) panRow.style.display='none';
+    if(range){
+      document.getElementById('range-xmin').value=parseFloat(range.min.toPrecision(6));
+      document.getElementById('range-xmax').value=parseFloat(range.max.toPrecision(6));
+    } else {
+      document.getElementById('range-xmin').value='';
+      document.getElementById('range-xmax').value='';
+    }
+    applyRange();
+    return;
+  }
+  if(panRow) panRow.style.display='flex';
+  const fullSpan=range.max-range.min;
+  const winSpan=fullSpan*(graphZoomPct/100);
+  const maxStart=Math.max(fullSpan-winSpan,0);
+  const start=range.min+maxStart*(graphPanPct/100);
+  const end=start+winSpan;
+  document.getElementById('range-xmin').value=parseFloat(start.toPrecision(6));
+  document.getElementById('range-xmax').value=parseFloat(end.toPrecision(6));
+  applyRange();
+}
+
+function setGraphZoom(val){
+  graphZoomPct=parseInt(val,10)||100;
+  const lbl=document.getElementById('graph-zoom-val');
+  if(lbl) lbl.textContent=graphZoomPct+'%';
+  applyGraphZoomPan();
+}
+
+function setGraphPan(val){
+  graphPanPct=parseInt(val,10)||0;
+  applyGraphZoomPan();
+}
+
+function syncZoomPanFromRange(xMin, xMax){
+  const zs=document.getElementById('graph-zoom-slider');
+  const zv=document.getElementById('graph-zoom-val');
+  const ps=document.getElementById('graph-pan-slider');
+  const pr=document.getElementById('graph-pan-row');
+  const range=getFullXRange();
+
+  if(!range || isNaN(xMin) || isNaN(xMax) || xMax<=xMin){
+    graphZoomPct=100; graphPanPct=0;
+    if(zs) zs.value=100;
+    if(zv) zv.textContent='100%';
+    if(ps) ps.value=0;
+    if(pr) pr.style.display='none';
+    return;
+  }
+
+  const fullSpan=range.max-range.min;
+  if(fullSpan<=0) return;
+  const winSpan=Math.min(xMax-xMin, fullSpan);
+  const zoomPct=Math.max(5, Math.min(100, (winSpan/fullSpan)*100));
+  graphZoomPct=zoomPct;
+  if(zs) zs.value=Math.round(zoomPct);
+  if(zv) zv.textContent=Math.round(zoomPct)+'%';
+
+  if(zoomPct>=99.5){
+    graphPanPct=0;
+    if(ps) ps.value=0;
+    if(pr) pr.style.display='none';
+  } else {
+    const maxStart=Math.max(fullSpan-winSpan,0);
+    const panPct=maxStart>0 ? Math.max(0,Math.min(100,((xMin-range.min)/maxStart)*100)) : 0;
+    graphPanPct=panPct;
+    if(ps) ps.value=Math.round(panPct);
+    if(pr) pr.style.display='flex';
+  }
+}
 
 function applyRange(){
   const xMin=parseFloat(document.getElementById('range-xmin').value.replace(',','.'));
@@ -961,11 +1233,13 @@ function applyRange(){
     yMin: isNaN(yMin)?null:yMin,
     yMax: isNaN(yMax)?null:yMax
   };
+  syncZoomPanFromRange(xMin, xMax);
   // Zachovej viditelnost
   const vis=chartInst?chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i)):[];
   if(regressionOn) computeRegression(); else showPointsOnly();
   if(chartInst) vis.forEach((v,i)=>{ if(!v) chartInst.hide(i); });
   if(chartInst) chartInst.update();
+  requestAnimationFrame(updateRangeInputs);
 }
 
 function resetRange(){
@@ -974,6 +1248,11 @@ function resetRange(){
     const el=document.getElementById(id);
     if(el) el.value='';
   });
+  graphZoomPct=100; graphPanPct=0;
+  const zs=document.getElementById('graph-zoom-slider'); if(zs) zs.value=100;
+  const zv=document.getElementById('graph-zoom-val'); if(zv) zv.textContent='100%';
+  const ps=document.getElementById('graph-pan-slider'); if(ps) ps.value=0;
+  const pr=document.getElementById('graph-pan-row'); if(pr) pr.style.display='none';
   recomputeKeepVis();
 }
 
@@ -1025,7 +1304,9 @@ function updateGeneralEq(){
   const type=document.getElementById('rType').value;
   const el=document.getElementById('eq-general');
   if(!el) return;
-  const tex=GENERAL_TEX[type]||'';
+  const tex=(type==='fourier')
+    ? `y = a_0 + \\sum_{k=1}^{${fourierHarmonics}}\\left[a_k\\cos(k\\omega x) + b_k\\sin(k\\omega x)\\right]`
+    : (GENERAL_TEX[type]||'');
   try{
     katex.render(tex, el, {throwOnError:false, displayMode:false});
   }catch(e){
@@ -1124,7 +1405,7 @@ function showPointsOnly(){
     },
     plugins:[{id:'bgFill',beforeDraw(chart){const{ctx:c2,chartArea}=chart;if(!chartArea)return;c2.save();c2.fillStyle=isDark?'#1c1c24':'#fafafa';c2.fillRect(chartArea.left,chartArea.top,chartArea.width,chartArea.height);c2.restore();}}]
   });
-  updateRangeInputs();
+  requestAnimationFrame(updateRangeInputs);
 }
 
 function computeRegression(){
@@ -1150,6 +1431,7 @@ function computeRegression(){
     else if(type==='gaussian2')   result=doMultiGaussian(x,y,2);
     else if(type==='gaussian3')   result=doMultiGaussian(x,y,3);
     else if(type==='rational')    result=doRational(x,y);
+    else if(type==='fourier')     result=doFourier(x,y,fourierHarmonics);
   }catch(err){
     eqEl.innerHTML=`<span class="err">❗ ${err.message}</span>`;
     pmEl.innerHTML='';
@@ -1188,6 +1470,14 @@ function resultToTex(r){
     }
     return `y = ${parts.join(' + ')} + ${n(r.params[r.params.length-1])}`;
   }
+  if(r.type==='fourier'){
+    const parts=[`${n(r.params[0])}`];
+    for(let k=1;k<=r.nH;k++){
+      const ak=r.params[1+2*(k-1)], bk=r.params[2+2*(k-1)];
+      parts.push(`${n(ak)}\\cos(${k}\\cdot${f6(r.omega)}x) + ${n(bk)}\\sin(${k}\\cdot${f6(r.omega)}x)`);
+    }
+    return `y = ${parts.join(' + ')}`;
+  }
   return r.eq;
 }
 
@@ -1216,6 +1506,19 @@ function displayResults(r, used, total){
            +`• FWHM${k+1} = (${f6(r.FWHMs[k].FWHM)} ± ${f6(r.FWHMs[k].seFWHM)})<br>`;
     }
     html+=`• c = (${f6(r.params[r.params.length-1])} ± ${f6(r.se[r.se.length-1])})<br>`;
+  } else if(r.type==='fourier'){
+    const hrStyle="border:none;border-top:1px solid var(--border);margin:5px 0;";
+    html+=`• a₀ = (${f6(r.params[0])} ± ${f6(r.se[0])})<br>`;
+    html+=`<hr style="${hrStyle}">`;
+    for(let k=1;k<=r.nH;k++){
+      const ak=r.params[1+2*(k-1)], bk=r.params[2+2*(k-1)];
+      const seAk=r.se[1+2*(k-1)], seBk=r.se[2+2*(k-1)];
+      html+=`• a${k} = (${f6(ak)} ± ${f6(seAk)})<br>`
+           +`• b${k} = (${f6(bk)} ± ${f6(seBk)})<br>`;
+      html+=`<hr style="${hrStyle}">`;
+    }
+    html+=`• ω = (${f6(r.omega)} ± ${f6(r.seOmega)}) rad<br>`
+         +`• Perioda T = (${f6(r.period)} ± ${f6(r.sePeriod)})<br>`;
   } else {
     html+=`• a = (${f6(r.a)} ± ${f6(r.seA)})<br>`
          +`• b = (${f6(r.b)} ± ${f6(r.seB)})<br>`;
@@ -1301,7 +1604,7 @@ function updateChart(result, x, y, excl){
   });
 
   datasets.push({
-    type:'line',label:result.eqShort||result.eq,
+    type:'line',label:'fit',
     data:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]})),
     borderColor:'#ff6b6b',borderWidth:2.5,
     pointRadius:0,fill:false,tension:0,order:2
@@ -1392,7 +1695,7 @@ function updateChart(result, x, y, excl){
       }
     }]
   });
-  updateRangeInputs();
+  requestAnimationFrame(updateRangeInputs);
 }
 
 /* ══════════════════════════════════════════════
