@@ -478,7 +478,7 @@ td input.cell:focus{
             <button class="rtype-option" onclick="selectRtype('gaussian2',this)">2× Gauss</button>
             <button class="rtype-option" onclick="selectRtype('gaussian3',this)">3× Gauss</button>
             <button class="rtype-option" onclick="selectRtype('rational',this)">Lomená lineární (y = (ax+b)/(cx+1))</button>
-            <button class="rtype-option special" onclick="selectRtype('fourier',this)">Fourierova řada (nastavitelné harm.)</button>
+            <button class="rtype-option special" onclick="selectRtype('fourier',this)">Fourierova řada</button>
           </div>
         </div>
 
@@ -649,12 +649,14 @@ let axisLabelsFromFile = false;
 let manualRange = {active:false, xMin:null, xMax:null, yMin:null, yMax:null}; // true pouze pokud byla detekována hlavička ze souboru
 
 /* ══════════════════════════════════════════════
-   VÍCE SAD DAT (max 3 záložky)
+   VÍCE SAD DAT (max 5 záložek)
 ══════════════════════════════════════════════ */
 const DATASET_COLORS = [
   {point:'#4a9eff', fit:'#1a5fc9', ciBorder:'rgba(26,95,201,0.4)',  ciBg:'rgba(26,95,201,0.16)',  excl:'#4a9eff'},
   {point:'#f5a623', fit:'#e07b00', ciBorder:'rgba(224,123,0,0.45)',  ciBg:'rgba(224,123,0,0.16)',  excl:'#f5a623'},
-  {point:'#2ecc71', fit:'#1f9d57', ciBorder:'rgba(31,157,87,0.45)',  ciBg:'rgba(31,157,87,0.16)',  excl:'#2ecc71'}
+  {point:'#2ecc71', fit:'#1f9d57', ciBorder:'rgba(31,157,87,0.45)',  ciBg:'rgba(31,157,87,0.16)',  excl:'#2ecc71'},
+  {point:'#b06fe0', fit:'#8a3fc0', ciBorder:'rgba(138,63,192,0.45)', ciBg:'rgba(138,63,192,0.16)', excl:'#b06fe0'},
+  {point:'#e05c8a', fit:'#c02a5f', ciBorder:'rgba(192,42,95,0.45)',  ciBg:'rgba(192,42,95,0.16)',  excl:'#e05c8a'}
 ];
 
 function makeEmptyDataset(name){
@@ -724,7 +726,7 @@ function renderTabsUI(){
   addBtn.className='ds-tab-add';
   addBtn.title='Přidat novou sadu dat';
   addBtn.textContent='+';
-  addBtn.disabled=datasets.length>=3;
+  addBtn.disabled=datasets.length>=5;
   addBtn.onclick=addDataset;
   wrap.appendChild(addBtn);
 
@@ -826,7 +828,7 @@ function switchDataset(idx){
 }
 
 function addDataset(){
-  if(datasets.length>=3) return;
+  if(datasets.length>=5) return;
   saveActiveDatasetSnapshot();
   datasets.push(makeEmptyDataset('Data '+(datasets.length+1)));
   activeDatasetIdx=datasets.length-1;
