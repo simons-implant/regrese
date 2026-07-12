@@ -22,3 +22,4 @@ Nad grafem se zobrazuje legenda, ve které mohou být celkem 4 pojmy: `Data` ozn
 
 - Verze `2.0` přínáší Fourierovskou analýzu a několik dalších vylepšení. Enjoy! 🎉
 - Verze `2.1` přidává navíc možnost zpracovat více sad dat najednou (maximálně však 5).
+- Verze `2.2` umožňuje aktuální stav analýzy uložit jako `.json` soubor a opětovně ho do aplikace nahrát.
