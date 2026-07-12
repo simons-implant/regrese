@@ -384,7 +384,7 @@ td input.cell:focus{
 <body>
 <div class="app">
   <header class="topbar" id="topBar">
-    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.1</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
+    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.2</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
     <div class="spacer"></div>
     <button onclick="openNavod()"
       title="Návod k použití"
@@ -402,7 +402,17 @@ td input.cell:focus{
 
   <div class="main">
     <div class="left">
-      <div id="dataset-tabs" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:2px;"></div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px;">
+        <div id="dataset-tabs" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;"></div>
+        <div style="flex:1;min-width:6px;"></div>
+        <input type="file" id="session-file-input" accept=".json" style="display:none" onchange="loadSession(this)">
+        <button onclick="document.getElementById('session-file-input').click()" title="Načíst celý rozpracovaný projekt (.json)"
+          style="background:transparent;border:none;cursor:pointer;font-size:15px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">📂<span class="btn-lbl">načíst<br>projekt</span></button>
+        <button onclick="saveSession()" title="Uložit celý rozpracovaný projekt (.json)"
+          style="background:transparent;border:none;cursor:pointer;font-size:15px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">💾<span class="btn-lbl">uložit<br>projekt</span></button>
+      </div>
       <div class="sec-label" style="white-space:nowrap;">Zadejte data (x, y):</div>
       <div style="display:flex;gap:4px;">
         <button onclick="document.getElementById('file-input').click()" title="Načíst soubor"
@@ -1466,6 +1476,119 @@ function getTableData(){
     else excl.push([xf,yf]);
   }
   return{x,y,excl};
+}
+
+/* ══════════════════════════════════════════════
+   ULOŽENÍ / NAČTENÍ CELÉHO PROJEKTU (.json)
+   Ukládá všechny sady dat (tabulky + nastavení regrese),
+   ne jen aktivní záložku.
+══════════════════════════════════════════════ */
+function extractXYFromRows(rows){
+  const x=[], y=[], excl=[];
+  (rows||[]).forEach(r=>{
+    const xv=String(r.x||'').trim().replace(',','.');
+    const yv=String(r.y||'').trim().replace(',','.');
+    if(!xv||!yv) return;
+    const xf=parseFloat(xv), yf=parseFloat(yv);
+    if(isNaN(xf)||isNaN(yf)) return;
+    if(r.checked){ x.push(xf); y.push(yf); }
+    else excl.push([xf,yf]);
+  });
+  return {x,y,excl};
+}
+
+function getSessionState(){
+  saveActiveDatasetSnapshot();
+  return {
+    app:'regresni-analyza', version:1, savedAt:new Date().toISOString(),
+    activeDatasetIdx,
+    datasets:datasets.map(ds=>({
+      name:ds.name, fileLabel:ds.fileLabel, tableRows:ds.tableRows,
+      xLabel:ds.xLabel, yLabel:ds.yLabel,
+      regressionType:ds.regressionType, regressionOn:ds.regressionOn,
+      fourierHarmonics:ds.fourierHarmonics, fourierAutoHarmonics:ds.fourierAutoHarmonics,
+      fourierManualPeriodOn:ds.fourierManualPeriodOn, fourierManualPeriod:ds.fourierManualPeriod,
+      showCI:ds.showCI
+    }))
+  };
+}
+
+function saveSession(){
+  const state=getSessionState();
+  const blob=new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='regrese_projekt.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function loadSession(input){
+  const file=input.files[0];
+  if(!file) return;
+  input.value='';
+  const reader=new FileReader();
+  reader.onload=e=>{
+    let state;
+    try{ state=JSON.parse(e.target.result); }
+    catch(err){ alert('Soubor se nepodařilo přečíst — není to platný JSON projekt.'); return; }
+    if(!state||!Array.isArray(state.datasets)||!state.datasets.length){
+      alert('Tenhle soubor neobsahuje platný projekt appky.'); return;
+    }
+    applySessionState(state);
+  };
+  reader.readAsText(file);
+}
+
+function applySessionState(state){
+  datasets=state.datasets.map(d=>Object.assign(makeEmptyDataset(d.name||'Data 1'), {
+    fileLabel:d.fileLabel||null,
+    tableRows:Array.isArray(d.tableRows)?d.tableRows:[],
+    xLabel:d.xLabel||'x', yLabel:d.yLabel||'y',
+    regressionType:d.regressionType||'linear',
+    regressionOn:!!d.regressionOn,
+    fourierHarmonics:d.fourierHarmonics||3,
+    fourierAutoHarmonics:d.fourierAutoHarmonics!==false,
+    fourierManualPeriodOn:!!d.fourierManualPeriodOn,
+    fourierManualPeriod:d.fourierManualPeriod||null,
+    showCI:!!d.showCI
+  }));
+  activeDatasetIdx=Math.min(Math.max(state.activeDatasetIdx||0,0), datasets.length-1);
+
+  // Přepočítej x/y/excl a případný fit pro VŠECHNY sady (ne jen aktivní),
+  // ať se v kombinovaném grafu hned po načtení zobrazí úplně všechno.
+  const prevH=fourierHarmonics, prevAuto=fourierAutoHarmonics, prevPeriod=fourierManualPeriod;
+  datasets.forEach(ds=>{
+    const {x,y,excl}=extractXYFromRows(ds.tableRows);
+    ds.x=x; ds.y=y; ds.excl=excl;
+    ds.lastResult=null;
+    if(ds.regressionOn && x.length>=2){
+      fourierHarmonics=ds.fourierHarmonics;
+      fourierAutoHarmonics=ds.fourierAutoHarmonics;
+      fourierManualPeriod=ds.fourierManualPeriod;
+      try{
+        ds.lastResult=computeFitForType(x,y,ds.regressionType);
+        if(ds.regressionType==='fourier') ds.fourierHarmonics=fourierHarmonics;
+      }catch(e){ ds.lastResult=null; }
+    }
+  });
+  fourierHarmonics=prevH; fourierAutoHarmonics=prevAuto; fourierManualPeriod=prevPeriod;
+
+  loadDatasetSnapshotUI(activeDatasetIdx);
+  renderTabsUI();
+
+  const activeDs=datasets[activeDatasetIdx];
+  if(activeDs.lastResult){
+    displayResults(activeDs.lastResult, activeDs.x.length, activeDs.x.length+activeDs.excl.length);
+  } else {
+    const eqEl=document.getElementById('resEq'), pmEl=document.getElementById('resParams');
+    if(eqEl) eqEl.textContent = activeDs.x.length<2 ? '—' : '—';
+    if(pmEl) pmEl.innerHTML='';
+  }
+  lastResult=activeDs.lastResult;
+  lastData={x:activeDs.x,y:activeDs.y,excl:activeDs.excl};
+  lastFourierResult=(activeDs.regressionType==='fourier')?activeDs.lastResult:lastFourierResult;
+  renderCombinedChart();
 }
 
 /* ══════════════════════════════════════════════
