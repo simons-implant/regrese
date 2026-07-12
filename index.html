@@ -402,9 +402,8 @@ td input.cell:focus{
 
   <div class="main">
     <div class="left">
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:2px;">
-        <div id="dataset-tabs" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;"></div>
-        <div style="flex:1;min-width:6px;"></div>
+      <div id="dataset-tabs" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:4px;"></div>
+      <div style="display:flex;gap:4px;margin-bottom:2px;">
         <input type="file" id="session-file-input" accept=".json" style="display:none" onchange="loadSession(this)">
         <button onclick="document.getElementById('session-file-input').click()" title="Načíst celý rozpracovaný projekt (.json)"
           style="background:transparent;border:none;cursor:pointer;font-size:15px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
@@ -677,6 +676,7 @@ function makeEmptyDataset(name){
     regressionType:'linear', regressionOn:false, showCI:false,
     fourierHarmonics:3, fourierAutoHarmonics:true,
     fourierManualPeriodOn:false, fourierManualPeriod:null,
+    hiddenSeries:{data:false, excl:false, fit:false, ci:false},
     lastResult:null, x:[], y:[], excl:[]
   };
 }
@@ -1508,14 +1508,35 @@ function getSessionState(){
       regressionType:ds.regressionType, regressionOn:ds.regressionOn,
       fourierHarmonics:ds.fourierHarmonics, fourierAutoHarmonics:ds.fourierAutoHarmonics,
       fourierManualPeriodOn:ds.fourierManualPeriodOn, fourierManualPeriod:ds.fourierManualPeriod,
-      showCI:ds.showCI
+      showCI:ds.showCI,
+      hiddenSeries:ds.hiddenSeries||{data:false,excl:false,fit:false,ci:false}
     }))
   };
 }
 
-function saveSession(){
+async function saveSession(){
   const state=getSessionState();
-  const blob=new Blob([JSON.stringify(state,null,2)], {type:'application/json'});
+  const json=JSON.stringify(state,null,2);
+
+  // Moderní prohlížeče (Chrome/Edge): nabídni skutečný dialog "Uložit jako"
+  if(window.showSaveFilePicker){
+    try{
+      const handle=await window.showSaveFilePicker({
+        suggestedName:'regrese_projekt.json',
+        types:[{description:'Projekt appky (JSON)', accept:{'application/json':['.json']}}]
+      });
+      const writable=await handle.createWritable();
+      await writable.write(json);
+      await writable.close();
+      return;
+    }catch(err){
+      if(err && err.name==='AbortError') return; // uživatel dialog zrušil — nic dalšího nedělej
+      // jinak (např. chyba zápisu) spadni do fallbacku níže
+    }
+  }
+
+  // Fallback (Firefox/Safari apod.) — normální stažení do složky Stažené soubory
+  const blob=new Blob([json], {type:'application/json'});
   const a=document.createElement('a');
   a.href=URL.createObjectURL(blob);
   a.download='regrese_projekt.json';
@@ -1551,7 +1572,8 @@ function applySessionState(state){
     fourierAutoHarmonics:d.fourierAutoHarmonics!==false,
     fourierManualPeriodOn:!!d.fourierManualPeriodOn,
     fourierManualPeriod:d.fourierManualPeriod||null,
-    showCI:!!d.showCI
+    showCI:!!d.showCI,
+    hiddenSeries:Object.assign({data:false,excl:false,fit:false,ci:false}, d.hiddenSeries||{})
   }));
   activeDatasetIdx=Math.min(Math.max(state.activeDatasetIdx||0,0), datasets.length-1);
 
@@ -2176,13 +2198,15 @@ function renderCombinedChart(){
     const col=DATASET_COLORS[i%DATASET_COLORS.length];
     const suffix=multi ? ` (${ds.name})` : '';
     const {x,y,excl,lastResult:result}=ds;
+    if(!ds.hiddenSeries) ds.hiddenSeries={data:false,excl:false,fit:false,ci:false};
 
     if(excl.length>0){
       combinedDatasets.push({
         type:'scatter',label:`Vyloučeno${suffix} (${excl.length})`,
         data:excl.map(p=>({x:p[0],y:p[1]})),
         backgroundColor:'transparent',borderColor:col.excl,
-        pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:3,_dsIdx:i
+        pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:3,
+        _dsIdx:i,_kind:'excl',hidden:!!ds.hiddenSeries.excl
       });
     }
 
@@ -2191,7 +2215,8 @@ function renderCombinedChart(){
         type:'scatter',label:`Data${suffix}`,
         data:x.map((xi,idx)=>({x:xi,y:y[idx]})),
         backgroundColor:col.point,borderColor:'rgba(255,255,255,.7)',
-        borderWidth:1.5,pointRadius:6,order:3,_dsIdx:i
+        borderWidth:1.5,pointRadius:6,order:3,
+        _dsIdx:i,_kind:'data',hidden:!!ds.hiddenSeries.data
       });
     }
 
@@ -2207,7 +2232,8 @@ function renderCombinedChart(){
         type:'line',label:`fit${suffix}`,
         data:xSmooth.map((xi,k)=>({x:xi,y:ySmooth[k]})),
         borderColor:col.fit,borderWidth:2.5,
-        pointRadius:0,fill:false,tension:0,order:2,_dsIdx:i
+        pointRadius:0,fill:false,tension:0,order:2,
+        _dsIdx:i,_kind:'fit',hidden:!!ds.hiddenSeries.fit
       });
 
       const dsUseCI = (i===activeDatasetIdx) ? showCI : ds.showCI;
@@ -2219,7 +2245,7 @@ function renderCombinedChart(){
           borderColor:col.ciBorder,backgroundColor:col.ciBg,
           borderWidth:1,borderDash:[4,3],
           pointRadius:0,fill:'+1',tension:0,order:4,
-          pointStyle:'rect',_ciPairId:i,_dsIdx:i
+          pointStyle:'rect',_ciPairId:i,_dsIdx:i,_kind:'ci',hidden:!!ds.hiddenSeries.ci
         });
         combinedDatasets.push({
           type:'line',label:`_ciLower${suffix}`,
@@ -2227,7 +2253,7 @@ function renderCombinedChart(){
           borderColor:col.ciBorder,backgroundColor:col.ciBg,
           borderWidth:1,borderDash:[4,3],
           pointRadius:0,fill:false,tension:0,order:5,
-          _ciPairId:i,_dsIdx:i
+          _ciPairId:i,_dsIdx:i,_kind:'ci',hidden:!!ds.hiddenSeries.ci
         });
       }
     }
@@ -2264,14 +2290,18 @@ function renderCombinedChart(){
             const idx=legendItem.datasetIndex;
             const ds=chart.data.datasets[idx];
             const label=ds?.label||'';
+            const targetDs = (ds && ds._dsIdx!==undefined) ? datasets[ds._dsIdx] : null;
+            if(targetDs && !targetDs.hiddenSeries) targetDs.hiddenSeries={data:false,excl:false,fit:false,ci:false};
             if(label.startsWith('IS 95 %') && ds._ciPairId!==undefined){
               const pairIdx=chart.data.datasets.findIndex((d,k)=>k!==idx && d._ciPairId===ds._ciPairId);
               const vis=chart.isDatasetVisible(idx);
               if(vis){ chart.hide(idx); if(pairIdx>=0) chart.hide(pairIdx); }
               else   { chart.show(idx); if(pairIdx>=0) chart.show(pairIdx); }
+              if(targetDs) targetDs.hiddenSeries.ci = vis;
             } else {
-              if(chart.isDatasetVisible(idx)) chart.hide(idx);
-              else chart.show(idx);
+              const vis=chart.isDatasetVisible(idx);
+              if(vis) chart.hide(idx); else chart.show(idx);
+              if(targetDs && ds._kind) targetDs.hiddenSeries[ds._kind] = vis;
             }
           }
         },
