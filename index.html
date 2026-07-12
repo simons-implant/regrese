@@ -358,12 +358,33 @@ td input.cell:focus{
   text-align:center;
   white-space:normal;
 }
+.ds-tab{
+  display:inline-flex;align-items:center;gap:5px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:4px 9px;font-size:12px;font-family:'Sora',sans-serif;
+  cursor:pointer;color:var(--text-muted);max-width:150px;
+  transition:background .15s,color .15s,border-color .15s;
+}
+.ds-tab:hover{color:var(--text);}
+.ds-tab.active{
+  background:var(--surface2);border-color:var(--accent);color:var(--text);font-weight:600;
+}
+.ds-tab .ds-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.ds-tab .ds-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ds-tab-add{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:26px;height:26px;border-radius:8px;
+  background:transparent;border:1px dashed var(--border);color:var(--text-muted);
+  cursor:pointer;font-size:15px;line-height:1;transition:opacity .15s,border-color .15s;
+}
+.ds-tab-add:hover{border-color:var(--accent);color:var(--accent);}
+.ds-tab-add:disabled{opacity:.3;cursor:not-allowed;}
 </style>
 </head>
 <body>
 <div class="app">
   <header class="topbar" id="topBar">
-    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.0</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
+    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.1</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
     <div class="spacer"></div>
     <button onclick="openNavod()"
       title="Návod k použití"
@@ -381,6 +402,7 @@ td input.cell:focus{
 
   <div class="main">
     <div class="left">
+      <div id="dataset-tabs" style="display:flex;gap:4px;flex-wrap:wrap;align-items:center;margin-bottom:2px;"></div>
       <div class="sec-label" style="white-space:nowrap;">Zadejte data (x, y):</div>
       <div style="display:flex;gap:4px;">
         <button onclick="document.getElementById('file-input').click()" title="Načíst soubor"
@@ -536,6 +558,10 @@ td input.cell:focus{
           style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">💾<span class="btn-lbl">uložit<br>PNG</span></button>
 
+        <button id="btn-save-all" onclick="saveGraphAll()" title="Uložit graf všech sad dat najednou (PNG)"
+          style="display:none;background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);flex-direction:column;align-items:center;"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">🖼️<span class="btn-lbl">uložit<br>vše</span></button>
+
       </div>
 
       <div class="graph-zoom-panel" id="graph-zoom-panel"
@@ -621,6 +647,195 @@ let showCI = false;
 let axisLabels = {x:'x', y:'y'};
 let axisLabelsFromFile = false;
 let manualRange = {active:false, xMin:null, xMax:null, yMin:null, yMax:null}; // true pouze pokud byla detekována hlavička ze souboru
+
+/* ══════════════════════════════════════════════
+   VÍCE SAD DAT (max 3 záložky)
+══════════════════════════════════════════════ */
+const DATASET_COLORS = [
+  {point:'#4a9eff', fit:'#1a5fc9', ciBorder:'rgba(26,95,201,0.4)',  ciBg:'rgba(26,95,201,0.16)',  excl:'#4a9eff'},
+  {point:'#f5a623', fit:'#e07b00', ciBorder:'rgba(224,123,0,0.45)',  ciBg:'rgba(224,123,0,0.16)',  excl:'#f5a623'},
+  {point:'#2ecc71', fit:'#1f9d57', ciBorder:'rgba(31,157,87,0.45)',  ciBg:'rgba(31,157,87,0.16)',  excl:'#2ecc71'}
+];
+
+function makeEmptyDataset(name){
+  return {
+    name, fileLabel:null,
+    tableRows:[],
+    xLabel:'x', yLabel:'y',
+    regressionType:'linear', regressionOn:false, showCI:false,
+    fourierHarmonics:3, fourierAutoHarmonics:true,
+    fourierManualPeriodOn:false, fourierManualPeriod:null,
+    lastResult:null, x:[], y:[], excl:[]
+  };
+}
+
+function escapeHtmlAttr(s){
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+
+function captureTableRows(){
+  const tb=document.getElementById('tbody');
+  const rows=[];
+  if(!tb) return rows;
+  for(let i=0;i<tb.rows.length;i++){
+    const row=tb.rows[i];
+    const cb=row.cells[1].querySelector('input[type="checkbox"]');
+    const xInput=row.cells[2].querySelector('input');
+    const yInput=row.cells[3].querySelector('input');
+    rows.push({x:xInput?xInput.value:'', y:yInput?yInput.value:'', checked:cb?cb.checked:true});
+  }
+  return rows;
+}
+
+function restoreTableRows(rows){
+  const tb=document.getElementById('tbody');
+  if(!tb) return;
+  tb.innerHTML='';
+  rows.forEach((r,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td class="row-num">${i+1}</td>
+      <td><input type="checkbox" ${r.checked?'checked':''} onchange="autoRecompute()"></td>
+      <td><input class="cell" type="text" value="${escapeHtmlAttr(r.x)}" data-r="${i}" data-c="x"
+                 onkeydown="handleKey(event,${i},'x')" oninput="autoRecompute()"></td>
+      <td><input class="cell" type="text" value="${escapeHtmlAttr(r.y)}" data-r="${i}" data-c="y"
+                 onkeydown="handleKey(event,${i},'y')" oninput="autoRecompute()"></td>`;
+    tb.appendChild(tr);
+  });
+}
+
+let datasets = [makeEmptyDataset('Data 1')];
+let activeDatasetIdx = 0;
+
+function renderTabsUI(){
+  const wrap=document.getElementById('dataset-tabs');
+  if(!wrap) return;
+  let html='';
+  datasets.forEach((ds,i)=>{
+    const col=DATASET_COLORS[i%DATASET_COLORS.length];
+    const label=ds.fileLabel ? `${ds.name}: ${ds.fileLabel}` : ds.name;
+    html+=`<div class="ds-tab${i===activeDatasetIdx?' active':''}" onclick="switchDataset(${i})" title="${label.replace(/"/g,'&quot;')}">`
+        + `<span class="ds-dot" style="background:${col.point};"></span>`
+        + `<span class="ds-label">${label}</span>`
+        + `</div>`;
+  });
+  wrap.innerHTML=html;
+  const addBtn=document.createElement('button');
+  addBtn.className='ds-tab-add';
+  addBtn.title='Přidat novou sadu dat';
+  addBtn.textContent='+';
+  addBtn.disabled=datasets.length>=3;
+  addBtn.onclick=addDataset;
+  wrap.appendChild(addBtn);
+
+  const saveAllBtn=document.getElementById('btn-save-all');
+  if(saveAllBtn){
+    const nWithData=datasets.filter(ds=>ds.x.length>0||ds.excl.length>0).length;
+    saveAllBtn.style.display=nWithData>=2?'inline-flex':'none';
+  }
+}
+
+function syncRtypeUI(type){
+  const sel=document.getElementById('rType');
+  if(sel) sel.value=type;
+  document.querySelectorAll('.rtype-option').forEach(b=>{
+    const onclickAttr=b.getAttribute('onclick')||'';
+    b.classList.toggle('selected', onclickAttr.includes(`'${type}'`));
+  });
+  updateFourierUI(type==='fourier');
+}
+
+function syncFourierControlsUI(ds){
+  const hSlider=document.getElementById('fourier-harmonics-slider');
+  const hLbl=document.getElementById('fourier-harmonics-val');
+  if(hSlider){ hSlider.value=ds.fourierHarmonics; hSlider.disabled=ds.fourierAutoHarmonics;
+    hSlider.style.opacity=ds.fourierAutoHarmonics?'.45':'1';
+    hSlider.style.cursor=ds.fourierAutoHarmonics?'not-allowed':'pointer'; }
+  if(hLbl) hLbl.textContent=ds.fourierHarmonics;
+  const autoTrack=document.getElementById('fourier-auto-track');
+  const autoKnob=document.getElementById('fourier-auto-knob');
+  if(autoTrack){ autoTrack.style.background=ds.fourierAutoHarmonics?'#c83030':'var(--btn)';
+    autoTrack.style.borderColor=ds.fourierAutoHarmonics?'#c83030':'var(--border)'; }
+  if(autoKnob) autoKnob.style.left=ds.fourierAutoHarmonics?'18px':'1px';
+  const pTrack=document.getElementById('fourier-period-track');
+  const pKnob=document.getElementById('fourier-period-knob');
+  const pRow=document.getElementById('fourier-period-row');
+  const pInput=document.getElementById('fourier-period-input');
+  if(pTrack){ pTrack.style.background=ds.fourierManualPeriodOn?'#c83030':'var(--btn)';
+    pTrack.style.borderColor=ds.fourierManualPeriodOn?'#c83030':'var(--border)'; }
+  if(pKnob) pKnob.style.left=ds.fourierManualPeriodOn?'18px':'1px';
+  if(pRow) pRow.style.display=ds.fourierManualPeriodOn?'flex':'none';
+  if(pInput) pInput.value=ds.fourierManualPeriod!=null?ds.fourierManualPeriod:'';
+}
+
+function saveActiveDatasetSnapshot(){
+  const ds=datasets[activeDatasetIdx];
+  ds.tableRows=captureTableRows();
+  ds.xLabel=axisLabels.x; ds.yLabel=axisLabels.y;
+  const sel=document.getElementById('rType');
+  if(sel) ds.regressionType=sel.value;
+  ds.regressionOn=regressionOn;
+  ds.showCI=showCI;
+  ds.fourierHarmonics=fourierHarmonics;
+  ds.fourierAutoHarmonics=fourierAutoHarmonics;
+  ds.fourierManualPeriodOn=fourierManualPeriodOn;
+  ds.fourierManualPeriod=fourierManualPeriod;
+}
+
+function loadDatasetSnapshotUI(idx){
+  const ds=datasets[idx];
+  restoreTableRows(ds.tableRows);
+  axisLabels.x=ds.xLabel; axisLabels.y=ds.yLabel;
+  const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
+  if(lx) lx.value=ds.xLabel;
+  if(ly) ly.value=ds.yLabel;
+  syncRtypeUI(ds.regressionType);
+  regressionOn=ds.regressionOn;
+  showCI=ds.showCI;
+  const ciBtn=document.getElementById('btn-ci');
+  if(ciBtn){
+    ciBtn.style.opacity=showCI?'1':'.6';
+    ciBtn.style.color=showCI?'var(--accent)':'var(--text)';
+  }
+  fourierHarmonics=ds.fourierHarmonics;
+  fourierAutoHarmonics=ds.fourierAutoHarmonics;
+  fourierManualPeriodOn=ds.fourierManualPeriodOn;
+  fourierManualPeriod=ds.fourierManualPeriod;
+  syncFourierControlsUI(ds);
+  const br=document.getElementById('btn-regrese');
+  if(br){
+    br.style.color=regressionOn?'var(--accent)':'var(--text)';
+    br.style.opacity=regressionOn?'1':'.6';
+    br.title=regressionOn?'Skrýt regresi':'Spustit analýzu';
+  }
+  updateGeneralEq();
+  const fl=document.getElementById('file-label');
+  if(fl){
+    if(ds.fileLabel){ fl.textContent=ds.fileLabel; fl.style.display='block'; }
+    else { fl.textContent=''; fl.style.display='none'; }
+  }
+}
+
+function switchDataset(idx){
+  if(idx===activeDatasetIdx || idx<0 || idx>=datasets.length) return;
+  saveActiveDatasetSnapshot();
+  activeDatasetIdx=idx;
+  loadDatasetSnapshotUI(idx);
+  renderTabsUI();
+  recomputeKeepVis();
+}
+
+function addDataset(){
+  if(datasets.length>=3) return;
+  saveActiveDatasetSnapshot();
+  datasets.push(makeEmptyDataset('Data '+(datasets.length+1)));
+  activeDatasetIdx=datasets.length-1;
+  loadDatasetSnapshotUI(activeDatasetIdx);
+  initTable();
+  renderTabsUI();
+  recomputeKeepVis();
+}
+
 
 const sysMQ = window.matchMedia('(prefers-color-scheme: dark)');
 sysMQ.addEventListener('change', () => {
@@ -1605,92 +1820,71 @@ function toggleRegression(){
 
 function showPointsOnly(){
   const {x,y,excl}=getTableData();
-  const allX=[...x,...excl.map(p=>p[0])];
-  if(!allX.length){ clearChart(); return; }
+  const ds=datasets[activeDatasetIdx];
+  ds.x=x; ds.y=y; ds.excl=excl; ds.lastResult=null;
+  renderCombinedChart();
+}
 
-  if(chartInst){chartInst.destroy();chartInst=null;}
-  const c=chartColors();
-  const datasets=[];
-
-  if(excl.length>0) datasets.push({
-    type:'scatter',label:`Vyloučeno (${excl.length})`,
-    data:excl.map(p=>({x:p[0],y:p[1]})),
-    backgroundColor:'transparent',borderColor:'#4a9eff',
-    pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:1
-  });
-
-  if(x.length>0) datasets.push({
-    type:'scatter',label:'Data',
-    data:x.map((xi,i)=>({x:xi,y:y[i]})),
-    backgroundColor:'#4a9eff',borderColor:'rgba(255,255,255,.7)',
-    borderWidth:1.5,pointRadius:6,order:2
-  });
-
-  const ctx=document.getElementById('myChart').getContext('2d');
-  chartInst=new Chart(ctx,{
-    type:'scatter',data:{datasets},
-    options:{
-      responsive:true,maintainAspectRatio:false,animation:{duration:200},
-      scales:{
-        x:{type:'linear',...getScaleOpts('x'),grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:axisLabels.x,color:c.tick,font:{family:'Sora',size:12}}},
-        y:{type:'linear',...getScaleOpts('y'),grid:{color:c.grid},ticks:{color:c.tick,font:{family:'Fira Code',size:11}},border:{color:c.axis},title:{display:true,text:axisLabels.y,color:c.tick,font:{family:'Sora',size:12}}}
-      },
-      plugins:{
-        legend:{labels:{color:c.tick,usePointStyle:true,font:{family:'Sora',size:11},boxWidth:10,padding:14}},
-        tooltip:{callbacks:{label:ctx=>{const d=ctx.raw;return ` (${d.x}, ${typeof d.y==='number'?d.y.toPrecision(6):d.y})`;}}},
-      }
-    },
-    plugins:[{id:'bgFill',beforeDraw(chart){const{ctx:c2,chartArea}=chart;if(!chartArea)return;c2.save();c2.fillStyle=isDark?'#1c1c24':'#fafafa';c2.fillRect(chartArea.left,chartArea.top,chartArea.width,chartArea.height);c2.restore();}}]
-  });
-  requestAnimationFrame(updateRangeInputs);
+function computeFitForType(x, y, type){
+  if(type==='linear')           return doLinear(x,y);
+  if(type==='exponential')      return doExponential(x,y);
+  if(type==='polynomial')       return doPolynomial(x,y);
+  if(type==='logarithmic')      return doLogarithmic(x,y);
+  if(type==='gaussian')         return doGaussian(x,y);
+  if(type==='gaussian2')        return doMultiGaussian(x,y,2);
+  if(type==='gaussian3')        return doMultiGaussian(x,y,3);
+  if(type==='rational')         return doRational(x,y);
+  if(type==='fourier'){
+    if(fourierAutoHarmonics){
+      const r=doFourierAuto(x,y,fourierManualPeriod);
+      fourierHarmonics=r.nH;
+      return r;
+    }
+    return doFourier(x,y,fourierHarmonics, fourierManualPeriod);
+  }
+  throw new Error('Neznámý typ regrese.');
 }
 
 function computeRegression(){
   const {x,y,excl}=getTableData();
   const eqEl=document.getElementById('resEq');
   const pmEl=document.getElementById('resParams');
+  const ds=datasets[activeDatasetIdx];
+  ds.x=x; ds.y=y; ds.excl=excl;
 
   if(x.length<2){
     eqEl.innerHTML='<span class="err">❗ Zadejte alespoň 2 zaškrtnuté body.</span>';
     pmEl.innerHTML='';
-    showPointsOnly();
+    ds.lastResult=null;
+    renderCombinedChart();
     return;
   }
 
   const type=document.getElementById('rType').value;
   let result;
   try{
-    if(type==='linear')           result=doLinear(x,y);
-    else if(type==='exponential') result=doExponential(x,y);
-    else if(type==='polynomial')  result=doPolynomial(x,y);
-    else if(type==='logarithmic') result=doLogarithmic(x,y);
-    else if(type==='gaussian')    result=doGaussian(x,y);
-    else if(type==='gaussian2')   result=doMultiGaussian(x,y,2);
-    else if(type==='gaussian3')   result=doMultiGaussian(x,y,3);
-    else if(type==='rational')    result=doRational(x,y);
-    else if(type==='fourier'){
-      if(fourierAutoHarmonics){
-        result=doFourierAuto(x,y,fourierManualPeriod);
-        fourierHarmonics=result.nH;
-        const slider=document.getElementById('fourier-harmonics-slider');
-        if(slider) slider.value=fourierHarmonics;
-        const lbl=document.getElementById('fourier-harmonics-val');
-        if(lbl) lbl.textContent=fourierHarmonics;
-      } else {
-        result=doFourier(x,y,fourierHarmonics, fourierManualPeriod);
-      }
+    result=computeFitForType(x,y,type);
+    if(type==='fourier'){
+      ds.fourierHarmonics=fourierHarmonics;
+      const slider=document.getElementById('fourier-harmonics-slider');
+      if(slider) slider.value=fourierHarmonics;
+      const lbl=document.getElementById('fourier-harmonics-val');
+      if(lbl) lbl.textContent=fourierHarmonics;
       lastFourierResult=result;
     }
   }catch(err){
     eqEl.innerHTML=`<span class="err">❗ ${err.message}</span>`;
     pmEl.innerHTML='';
+    ds.lastResult=null;
+    renderCombinedChart();
     return;
   }
 
   displayResults(result, x.length, x.length+excl.length);
+  ds.lastResult=result;
   lastResult=result; lastData={x,y,excl};
   const _br2=document.getElementById('btn-regrese'); if(_br2){_br2.style.color='var(--accent)';_br2.style.opacity='1';_br2.title='Skrýt regresi';}
-  updateChart(result, x, y, excl);
+  renderCombinedChart();
 }
 
 /* ══════════════════════════════════════════════
@@ -1805,102 +1999,121 @@ function clearChart(){
   ctx.fillRect(0,0,canvas.width,canvas.height);
 }
 
-function updateChart(result, x, y, excl){
+function buildCiBand(result, x, y, xSmooth, ySmooth, useCI){
+  if(!(useCI && result && result.yp)) return null;
+  const n=x.length;
+  const p = result.type==='polynomial'?3 : result.type==='gaussian'?4 :
+            result.type==='gaussian2'?7 : result.type==='gaussian3'?10 :
+            result.type==='rational'?3 : 2;
+  const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
+  const tCrit = n>30 ? 1.96 : n>10 ? 2.228 : 2.776;
+
+  if(result.type==='linear'){
+    const xMean=x.reduce((s,v)=>s+v,0)/n;
+    const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
+    return {
+      upper:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)})),
+      lower:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}))
+    };
+  } else if(result.type==='fourier' && result.covMatrix && result.jacFn){
+    const cov=result.covMatrix;
+    const seY=xSmooth.map(xi=>{
+      const jv=result.jacFn(xi);
+      let s2=0;
+      for(let i=0;i<jv.length;i++) for(let j=0;j<jv.length;j++) s2+=jv[i]*cov[i][j]*jv[j];
+      return Math.sqrt(Math.max(0,s2));
+    });
+    return {
+      upper:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*seY[i]})),
+      lower:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*seY[i]}))
+    };
+  }
+  return {
+    upper:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse})),
+    lower:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse}))
+  };
+}
+
+function renderCombinedChart(){
+  renderTabsUI();
   if(chartInst){chartInst.destroy();chartInst=null;}
 
-  const xMin=Math.min(...x), xMax=Math.max(...x);
-  const step=(xMax-xMin)/399||1;
-  const xSmooth=Array.from({length:400},(_,i)=>xMin+i*step);
-  let ySmooth;
-  try{ ySmooth=xSmooth.map(result.smooth); }
-  catch(e){ ySmooth=xSmooth.map(()=>NaN); }
+  const activeDatasets=datasets
+    .map((ds,i)=>({ds,i}))
+    .filter(({ds})=>ds.x.length>0||ds.excl.length>0);
 
-  // Výpočet intervalu spolehlivosti
-  let ciUpper=null, ciLower=null;
-  if(showCI && result.yp){
-    const n=x.length;
-    const p = result.type==='polynomial'?3 : result.type==='gaussian'?4 :
-              result.type==='gaussian2'?7 : result.type==='gaussian3'?10 :
-              result.type==='rational'?3 : 2;
-    const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
-    // t kritická hodnota 95% — aproximace pro velká n → 1.96, pro malá přesnější
-    const tCrit = n>30 ? 1.96 : n>10 ? 2.228 : 2.776;
+  if(!activeDatasets.length){ clearChart(); return; }
 
-    if(result.type==='linear'){
-      // Přesný vzorec pro lineární regresi
-      const xMean=x.reduce((s,v)=>s+v,0)/n;
-      const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
-      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
-      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
-    } else if(result.type==='fourier' && result.covMatrix && result.jacFn){
-      // Přesný pás založený na kovarianční matici parametrů (delta metoda):
-      // SE_y(x) = sqrt( jac(x)^T · Cov · jac(x) ) — užší uprostřed dat, širší na okrajích
-      const cov=result.covMatrix;
-      const seY=xSmooth.map(xi=>{
-        const jv=result.jacFn(xi);
-        let s2=0;
-        for(let i=0;i<jv.length;i++) for(let j=0;j<jv.length;j++) s2+=jv[i]*cov[i][j]*jv[j];
-        return Math.sqrt(Math.max(0,s2));
+  const multi=activeDatasets.length>1;
+  const combinedDatasets=[];
+
+  activeDatasets.forEach(({ds,i})=>{
+    const col=DATASET_COLORS[i%DATASET_COLORS.length];
+    const suffix=multi ? ` (${ds.name})` : '';
+    const {x,y,excl,lastResult:result}=ds;
+
+    if(excl.length>0){
+      combinedDatasets.push({
+        type:'scatter',label:`Vyloučeno${suffix} (${excl.length})`,
+        data:excl.map(p=>({x:p[0],y:p[1]})),
+        backgroundColor:'transparent',borderColor:col.excl,
+        pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:3,_dsIdx:i
       });
-      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*seY[i]}));
-      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*seY[i]}));
-    } else {
-      // Přibližný uniformní pás pro ostatní nelineární regrese
-      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse}));
-      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse}));
     }
-  }
+
+    if(x.length>0){
+      combinedDatasets.push({
+        type:'scatter',label:`Data${suffix}`,
+        data:x.map((xi,idx)=>({x:xi,y:y[idx]})),
+        backgroundColor:col.point,borderColor:'rgba(255,255,255,.7)',
+        borderWidth:1.5,pointRadius:6,order:3,_dsIdx:i
+      });
+    }
+
+    if(result && x.length>0){
+      const xMin=Math.min(...x), xMax=Math.max(...x);
+      const step=(xMax-xMin)/399||1;
+      const xSmooth=Array.from({length:400},(_,k)=>xMin+k*step);
+      let ySmooth;
+      try{ ySmooth=xSmooth.map(result.smooth); }
+      catch(e){ ySmooth=xSmooth.map(()=>NaN); }
+
+      combinedDatasets.push({
+        type:'line',label:`fit${suffix}`,
+        data:xSmooth.map((xi,k)=>({x:xi,y:ySmooth[k]})),
+        borderColor:col.fit,borderWidth:2.5,
+        pointRadius:0,fill:false,tension:0,order:2,_dsIdx:i
+      });
+
+      const dsUseCI = (i===activeDatasetIdx) ? showCI : ds.showCI;
+      const ci=buildCiBand(result,x,y,xSmooth,ySmooth,dsUseCI);
+      if(ci){
+        combinedDatasets.push({
+          type:'line',label:`IS 95 %${suffix}`,
+          data:ci.upper,
+          borderColor:col.ciBorder,backgroundColor:col.ciBg,
+          borderWidth:1,borderDash:[4,3],
+          pointRadius:0,fill:'+1',tension:0,order:4,
+          pointStyle:'rect',_ciPairId:i,_dsIdx:i
+        });
+        combinedDatasets.push({
+          type:'line',label:`_ciLower${suffix}`,
+          data:ci.lower,
+          borderColor:col.ciBorder,backgroundColor:col.ciBg,
+          borderWidth:1,borderDash:[4,3],
+          pointRadius:0,fill:false,tension:0,order:5,
+          _ciPairId:i,_dsIdx:i
+        });
+      }
+    }
+  });
 
   const c=chartColors();
-  const datasets=[];
-
-  if(excl.length>0){
-    datasets.push({
-      type:'scatter',label:`Vyloučeno (${excl.length})`,
-      data:excl.map(p=>({x:p[0],y:p[1]})),
-      backgroundColor:'transparent',borderColor:'#4a9eff',
-      pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:3
-    });
-  }
-
-  datasets.push({
-    type:'scatter',label:'Data',
-    data:x.map((xi,i)=>({x:xi,y:y[i]})),
-    backgroundColor:'#4a9eff',borderColor:'rgba(255,255,255,.7)',
-    borderWidth:1.5,pointRadius:6,order:3
-  });
-
-  datasets.push({
-    type:'line',label:'fit',
-    data:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]})),
-    borderColor:'#ff6b6b',borderWidth:2.5,
-    pointRadius:0,fill:false,tension:0,order:2
-  });
-
-  if(ciUpper&&ciLower){
-    datasets.push({
-      type:'line',label:'IS 95 %',
-      data:ciUpper,
-      borderColor:'rgba(255,107,107,0.4)',
-      backgroundColor:'rgba(255,107,107,0.18)',
-      borderWidth:1,borderDash:[4,3],
-      pointRadius:0,fill:'+1',tension:0,order:4,
-      pointStyle:'rect'
-    });
-    datasets.push({
-      type:'line',label:'_ciLower',
-      data:ciLower,
-      borderColor:'rgba(255,107,107,0.4)',
-      backgroundColor:'rgba(255,107,107,0.18)',
-      borderWidth:1,borderDash:[4,3],
-      pointRadius:0,fill:false,tension:0,order:5
-    });
-  }
-
+  const activeLabels=datasets[activeDatasetIdx];
   const ctx=document.getElementById('myChart').getContext('2d');
   chartInst=new Chart(ctx,{
     type:'scatter',
-    data:{datasets},
+    data:{datasets:combinedDatasets},
     options:{
       responsive:true,maintainAspectRatio:false,
       animation:{duration:300},
@@ -1909,31 +2122,29 @@ function updateChart(result, x, y, excl){
            grid:{color:c.grid},
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
-           title:{display:true,text:axisLabels.x,color:c.tick,font:{family:'Sora',size:12}}},
+           title:{display:true,text:activeLabels.xLabel,color:c.tick,font:{family:'Sora',size:12}}},
         y:{type:'linear',
            grid:{color:c.grid},
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
-           title:{display:true,text:axisLabels.y,color:c.tick,font:{family:'Sora',size:12}}}
+           title:{display:true,text:activeLabels.yLabel,color:c.tick,font:{family:'Sora',size:12}}}
       },
       plugins:{
         legend:{
           labels:{color:c.tick,usePointStyle:true,
                   font:{family:'Sora',size:11},boxWidth:10,padding:14,
-                  filter:item=>item.text!=='_ciLower'},
+                  filter:item=>!item.text.startsWith('_ciLower')},
           onClick(e, legendItem, legend){
             const chart=legend.chart;
             const idx=legendItem.datasetIndex;
-            const label=chart.data.datasets[idx]?.label;
-            // Pokud klikneme na CI, schováme/zobrazíme oba CI datasety
-            if(label==='IS 95 %'){
-              const ciIdx=chart.data.datasets.findIndex(d=>d.label==='IS 95 %');
-              const ciLowIdx=chart.data.datasets.findIndex(d=>d.label==='_ciLower');
-              const vis=chart.isDatasetVisible(ciIdx);
-              if(vis){ chart.hide(ciIdx); if(ciLowIdx>=0) chart.hide(ciLowIdx); }
-              else   { chart.show(ciIdx); if(ciLowIdx>=0) chart.show(ciLowIdx); }
+            const ds=chart.data.datasets[idx];
+            const label=ds?.label||'';
+            if(label.startsWith('IS 95 %') && ds._ciPairId!==undefined){
+              const pairIdx=chart.data.datasets.findIndex((d,k)=>k!==idx && d._ciPairId===ds._ciPairId);
+              const vis=chart.isDatasetVisible(idx);
+              if(vis){ chart.hide(idx); if(pairIdx>=0) chart.hide(pairIdx); }
+              else   { chart.show(idx); if(pairIdx>=0) chart.show(pairIdx); }
             } else {
-              // Standardní chování pro ostatní datasety
               if(chart.isDatasetVisible(idx)) chart.hide(idx);
               else chart.show(idx);
             }
@@ -1973,6 +2184,8 @@ function loadFile(input){
   if(!file) return;
   const lbl=document.getElementById('file-label');
   if(lbl){ lbl.textContent='📄 '+file.name; lbl.style.display='block'; }
+  datasets[activeDatasetIdx].fileLabel=file.name;
+  renderTabsUI();
   input.value='';
   const reader=new FileReader();
   reader.onload=e=>{ parseAndFill(e.target.result); };
@@ -2081,6 +2294,7 @@ function getOverlayPos(e, overlay){
 }
 
 document.addEventListener('DOMContentLoaded',()=>{
+  renderTabsUI();
   const overlay=document.getElementById('sel-overlay');
 
   overlay.addEventListener('mousedown',e=>{
@@ -2190,18 +2404,23 @@ function clearData(){
   if(ly) ly.value='y';
   const lbl=document.getElementById('file-label');
   if(lbl){ lbl.textContent=''; lbl.style.display='none'; }
+  datasets[activeDatasetIdx].fileLabel=null;
+  datasets[activeDatasetIdx].lastResult=null;
+  datasets[activeDatasetIdx].x=[]; datasets[activeDatasetIdx].y=[]; datasets[activeDatasetIdx].excl=[];
+  renderTabsUI();
   const _br=document.getElementById('btn-regrese'); if(_br){_br.style.color='var(--text)';_br.style.opacity='.6';_br.title='Spustit analýzu';}
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
   for(let i=0;i<6;i++) addRow();
   const _eq=document.getElementById('resEq'); if(_eq) _eq.textContent='—';
   document.getElementById('resParams').textContent='';
-  clearChart();
+  recomputeKeepVis();
 }
 
 function saveGraph(){
   if(!lastResult||!lastData){alert('Nejprve proveďte regresi.');return;}
   const {x,y,excl}=lastData, result=lastResult;
+  const col=DATASET_COLORS[activeDatasetIdx%DATASET_COLORS.length];
 
   // Přečti viditelnost datasetů z aktuálního grafu
   const visibility = chartInst
@@ -2226,22 +2445,22 @@ function saveGraph(){
   if(excl.length>0) allDs.push({
     type:'scatter',label:`Vyloučeno (${excl.length})`,
     data:excl.map(p=>({x:p[0],y:p[1]})),
-    backgroundColor:'transparent',borderColor:'#2264c0',
+    backgroundColor:'transparent',borderColor:col.excl,
     pointStyle:'circle',pointRadius:18,pointBorderWidth:4,order:1
   });
   allDs.push({
     type:'scatter',label:'Data',
     data:x.map((xi,i)=>({x:xi,y:y[i]})),
-    backgroundColor:'#2264c0',borderColor:'rgba(0,0,0,.25)',
+    backgroundColor:col.point,borderColor:'rgba(0,0,0,.25)',
     borderWidth:4,pointRadius:18,order:2
   });
   allDs.push({
     type:'line',label:'fit',
     data:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]})),
-    borderColor:'#cc3030',borderWidth:7,pointRadius:0,fill:false,tension:0,order:3
+    borderColor:col.fit,borderWidth:7,pointRadius:0,fill:false,tension:0,order:3
   });
 
-  // CI pás — stejný výpočet jako v updateChart
+  // CI pás — stejný výpočet jako v renderCombinedChart
   if(showCI && result.yp){
     const n=x.length;
     const p = result.type==='polynomial'?3 : result.type==='gaussian'?4 :
@@ -2271,13 +2490,13 @@ function saveGraph(){
     }
     allDs.push({
       type:'line',label:'IS 95 %',data:ciUpper,
-      borderColor:'rgba(200,50,50,0.4)',backgroundColor:'rgba(200,50,50,0.12)',
+      borderColor:col.ciBorder,backgroundColor:col.ciBg,
       borderWidth:1,borderDash:[4,3],pointRadius:0,fill:'+1',tension:0,order:4,
       pointStyle:'rect'
     });
     allDs.push({
       type:'line',label:'_ciLower',data:ciLower,
-      borderColor:'rgba(200,50,50,0.4)',backgroundColor:'rgba(200,50,50,0.12)',
+      borderColor:col.ciBorder,backgroundColor:col.ciBg,
       borderWidth:1,borderDash:[4,3],pointRadius:0,fill:false,tension:0,order:5
     });
   }
@@ -2325,12 +2544,113 @@ function saveGraph(){
   },120);
 }
 
+function saveGraphAll(){
+  const activeDatasets=datasets
+    .map((ds,i)=>({ds,i}))
+    .filter(({ds})=>ds.x.length>0||ds.excl.length>0);
+  if(activeDatasets.length<2){ alert('Pro export všech dat najednou potřebuješ alespoň 2 sady dat s daty.'); return; }
+
+  const multi=true;
+  const tmp=document.createElement('canvas');
+  tmp.width=2700; tmp.height=1800;
+  document.body.appendChild(tmp);
+  const lc={bg:'#fafafa',grid:'rgba(0,0,0,.07)',tick:'#33334a',axis:'#cccccc'};
+
+  const allDs=[];
+  activeDatasets.forEach(({ds,i})=>{
+    const col=DATASET_COLORS[i%DATASET_COLORS.length];
+    const suffix=` (${ds.name})`;
+    const {x,y,excl,lastResult:result}=ds;
+
+    if(excl.length>0) allDs.push({
+      type:'scatter',label:`Vyloučeno${suffix} (${excl.length})`,
+      data:excl.map(p=>({x:p[0],y:p[1]})),
+      backgroundColor:'transparent',borderColor:col.excl,
+      pointStyle:'circle',pointRadius:18,pointBorderWidth:4,order:1
+    });
+    if(x.length>0) allDs.push({
+      type:'scatter',label:`Data${suffix}`,
+      data:x.map((xi,k)=>({x:xi,y:y[k]})),
+      backgroundColor:col.point,borderColor:'rgba(0,0,0,.25)',
+      borderWidth:4,pointRadius:18,order:2
+    });
+    if(result && x.length>0){
+      const xMin=Math.min(...x), xMax=Math.max(...x);
+      const step=(xMax-xMin)/399||1;
+      const xSmooth=Array.from({length:400},(_,k)=>xMin+k*step);
+      let ySmooth;
+      try{ ySmooth=xSmooth.map(result.smooth); }catch(e){ ySmooth=xSmooth.map(()=>NaN); }
+      allDs.push({
+        type:'line',label:`fit${suffix}`,
+        data:xSmooth.map((xi,k)=>({x:xi,y:ySmooth[k]})),
+        borderColor:col.fit,borderWidth:7,pointRadius:0,fill:false,tension:0,order:3
+      });
+      const dsUseCI=(i===activeDatasetIdx)?showCI:ds.showCI;
+      const ci=buildCiBand(result,x,y,xSmooth,ySmooth,dsUseCI);
+      if(ci){
+        allDs.push({
+          type:'line',label:`IS 95 %${suffix}`,data:ci.upper,
+          borderColor:col.ciBorder,backgroundColor:col.ciBg,
+          borderWidth:1,borderDash:[4,3],pointRadius:0,fill:'+1',tension:0,order:4,
+          pointStyle:'rect'
+        });
+        allDs.push({
+          type:'line',label:`_ciLower${suffix}`,data:ci.lower,
+          borderColor:col.ciBorder,backgroundColor:col.ciBg,
+          borderWidth:1,borderDash:[4,3],pointRadius:0,fill:false,tension:0,order:5
+        });
+      }
+    }
+  });
+
+  const activeLabels=datasets[activeDatasetIdx];
+  const ec=new Chart(tmp,{
+    type:'scatter',data:{datasets:allDs},
+    options:{
+      responsive:false,animation:false,
+      scales:{
+        x:{type:'linear',grid:{color:lc.grid},
+           ticks:{color:lc.tick,font:{family:'Fira Code',size:33}},
+           border:{color:lc.axis},
+           title:{display:true,text:activeLabels.xLabel,color:lc.tick,font:{family:'Sora',size:36}}},
+        y:{type:'linear',grid:{color:lc.grid},
+           ticks:{color:lc.tick,font:{family:'Fira Code',size:33}},
+           border:{color:lc.axis},
+           title:{display:true,text:activeLabels.yLabel,color:lc.tick,font:{family:'Sora',size:36}}}
+      },
+      plugins:{
+        legend:{labels:{color:lc.tick,usePointStyle:true,
+                        font:{family:'Sora',size:30},boxWidth:28,padding:36,
+                        filter:item=>!item.text.startsWith('_ciLower')}},
+        tooltip:{enabled:false}
+      }
+    },
+    plugins:[{id:'bg',beforeDraw(ch){
+      const{ctx:c2,chartArea:ca}=ch;
+      if(!ca) return;
+      c2.save();c2.fillStyle='#ffffff';
+      c2.fillRect(0,0,tmp.width,tmp.height);
+      c2.restore();
+    }}]
+  });
+
+  setTimeout(()=>{
+    const a=document.createElement('a');
+    a.href=tmp.toDataURL('image/png');
+    a.download='regrese_vsechna_data.png';
+    a.click();
+    ec.destroy();
+    document.body.removeChild(tmp);
+  },120);
+}
+
 /* ══════════════════════════════════════════════
    SVG EXPORT
 ══════════════════════════════════════════════ */
 function saveGraphSVG(){
   const {x,y,excl}=lastData, result=lastResult;
   const visibility=chartInst?chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i)):[];
+  const col=DATASET_COLORS[activeDatasetIdx%DATASET_COLORS.length];
 
   const W=900,H=600,ml=60,mr=30,mt=20,mb=60;
   const pw=W-ml-mr, ph=H-mt-mb;
@@ -2357,9 +2677,8 @@ function saveGraphSVG(){
   datasets.push({type:'data',pts:x.map((xi,i)=>[xi,y[i]])});
   datasets.push({type:'line',pts:xSmooth.map((xi,i)=>[xi,ySmooth[i]])});
 
-  // CI pro SVG — zobraz jen pokud je showCI zapnuté A dataset je viditelný v živém grafu
-  const ciDatasetIdx=chartInst?chartInst.data.datasets.findIndex(d=>d.label==='IS 95 %'):-1;
-  const ciVisible=showCI && ciDatasetIdx>=0 && chartInst.isDatasetVisible(ciDatasetIdx);
+  // CI pro SVG — zobraz jen pokud je pro tuto (aktivní) záložku zapnuté IS 95%
+  const ciVisible=showCI;
   let ciSVG=null;
   if(ciVisible && result.yp){
     const n=x.length;
@@ -2426,11 +2745,11 @@ function saveGraphSVG(){
     const lPts=ciSVG.lower.filter(p=>isFinite(p[1])).map(clip).reverse();
     if(uPts.length>1){
       const poly=[...uPts,...lPts].map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-      svg+=`<polygon points="${poly}" fill="rgba(200,50,50,0.12)"/>`;
+      svg+=`<polygon points="${poly}" fill="${col.ciBg}"/>`;
       const du=uPts.map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
       const dl=lPts.slice().reverse().map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-      svg+=`<path d="${du}" fill="none" stroke="rgba(200,50,50,0.4)" stroke-width="1" stroke-dasharray="4,3"/>`;
-      svg+=`<path d="${dl}" fill="none" stroke="rgba(200,50,50,0.4)" stroke-width="1" stroke-dasharray="4,3"/>`;
+      svg+=`<path d="${du}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
+      svg+=`<path d="${dl}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
     }
   }
 
@@ -2440,14 +2759,14 @@ function saveGraphSVG(){
       const pts=ds.pts.filter(p=>isFinite(p[1]));
       if(!pts.length) return;
       const d=pts.map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
-      svg+=`<path d="${d}" fill="none" stroke="#cc3030" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+      svg+=`<path d="${d}" fill="none" stroke="${col.fit}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
     } else if(ds.type==='data'){
       ds.pts.forEach(([xi,yi])=>{
-        svg+=`<circle cx="${px(xi).toFixed(1)}" cy="${py(yi).toFixed(1)}" r="6" fill="#2264c0" stroke="rgba(0,0,0,0.25)" stroke-width="1.5"/>`;
+        svg+=`<circle cx="${px(xi).toFixed(1)}" cy="${py(yi).toFixed(1)}" r="6" fill="${col.point}" stroke="rgba(0,0,0,0.25)" stroke-width="1.5"/>`;
       });
     } else if(ds.type==='excl'){
       ds.pts.forEach(([xi,yi])=>{
-        svg+=`<circle cx="${px(xi).toFixed(1)}" cy="${py(yi).toFixed(1)}" r="6" fill="none" stroke="#2264c0" stroke-width="2"/>`;
+        svg+=`<circle cx="${px(xi).toFixed(1)}" cy="${py(yi).toFixed(1)}" r="6" fill="none" stroke="${col.excl}" stroke-width="2"/>`;
       });
     }
   });
@@ -2684,10 +3003,12 @@ async function loadNavod() {
 ══════════════════════════════════════════════ */
 let advParsed = null; // { headers: bool, data: string[][] (rows×cols) }
 let advSelX = null, advSelY = null; // index vybraného sloupce/řádku
+let advFileName = null;
 
 function advLoadFile(input){
   const file = input.files[0];
   if(!file) return;
+  advFileName = file.name;
   input.value = '';
   const reader = new FileReader();
   reader.onload = e => {
@@ -2981,6 +3302,7 @@ function advConfirm(){
   });
   addRow();
   updateMasterCheckbox();
+  if(advFileName){ datasets[activeDatasetIdx].fileLabel=advFileName; renderTabsUI(); }
   showPointsOnly();
   document.getElementById('resEq').innerHTML=
     `<span style="color:var(--success)">✅ Načteno ${xVals.length} bodů · osy: ${labelX}, ${labelY}</span>`;
