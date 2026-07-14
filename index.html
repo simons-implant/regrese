@@ -236,6 +236,21 @@ select#rType:focus{border-color:var(--accent);}
   border-radius:6px;
   margin-left:8px;
 }
+.rtype-option.custom-saved{
+  display:flex;align-items:center;justify-content:space-between;gap:6px;
+  border-left:3px solid #7c3aed;
+  background:rgba(124,58,237,0.05);
+}
+.rtype-option.custom-saved:hover{background:rgba(124,58,237,0.14);}
+.rtype-option.custom-saved.selected{color:#7c3aed;}
+.rtype-option.custom-saved .eq-name{
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;
+}
+.rtype-option.custom-saved .eq-remove{
+  background:transparent;border:none;color:var(--text-muted);cursor:pointer;
+  font-size:13px;padding:2px 4px;flex-shrink:0;line-height:1;
+}
+.rtype-option.custom-saved .eq-remove:hover{color:#c83030;}
 .results-panel{
   flex:1;background:var(--surface);border:1px solid var(--border);
   border-radius:10px;padding:11px 13px;font-size:13px;
@@ -405,7 +420,7 @@ td input.cell:focus{
 <body>
 <div class="app">
   <header class="topbar" id="topBar">
-    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.3</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
+    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.31</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
     <div class="spacer"></div>
     <button onclick="openNavod()"
       title="Návod k použití"
@@ -510,6 +525,8 @@ td input.cell:focus{
             <button class="rtype-option" onclick="selectRtype('rational',this)">Lomená lineární (y = (ax+b)/(cx+1))</button>
             <button class="rtype-option special" onclick="selectRtype('fourier',this)">Fourierova řada</button>
             <button class="rtype-option custom-beta" onclick="openCustomFormulaModal()">Vlastní rovnice</button>
+            <div id="custom-eq-library-sep" style="display:none;border-top:1px solid var(--border);margin:5px 8px;padding-top:5px;font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;padding-left:4px;">Uložené rovnice</div>
+            <div id="custom-eq-library-items"></div>
           </div>
         </div>
 
@@ -1526,6 +1543,7 @@ function getSessionState(){
   return {
     app:'regresni-analyza', version:1, savedAt:new Date().toISOString(),
     activeDatasetIdx,
+    customEquationLibrary:customEquationLibrary,
     datasets:datasets.map(ds=>({
       name:ds.name, fileLabel:ds.fileLabel, tableRows:ds.tableRows,
       xLabel:ds.xLabel, yLabel:ds.yLabel,
@@ -1587,6 +1605,21 @@ function loadSession(input){
 }
 
 function applySessionState(state){
+  if(Array.isArray(state.customEquationLibrary)){
+    state.customEquationLibrary.forEach(eq=>{
+      if(!eq||!eq.formula||!eq.name) return;
+      const exists=customEquationLibrary.some(e=>e.formula===eq.formula && e.name===eq.name);
+      if(!exists){
+        customEquationLibrary.push({
+          id: eq.id || ('custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,7)),
+          name: eq.name, formula: eq.formula
+        });
+      }
+    });
+    saveCustomEquationLibrary();
+    renderCustomEquationDropdownItems();
+  }
+
   datasets=state.datasets.map(d=>Object.assign(makeEmptyDataset(d.name||'Data 1'), {
     fileLabel:d.fileLabel||null,
     tableRows:Array.isArray(d.tableRows)?d.tableRows:[],
@@ -1801,6 +1834,105 @@ function confirmCustomFormula(){
   ds.customFormula=raw;
   const btn=[...document.querySelectorAll('.rtype-option')].find(b=>b.getAttribute('onclick')==='openCustomFormulaModal()');
   if(btn) selectRtype('custom', btn);
+  closeCustomFormulaModal();
+}
+
+/* ── Knihovna uložených vlastních rovnic (rychlý výběr) ── */
+let customEquationLibrary=[];
+
+function loadCustomEquationLibrary(){
+  try{
+    const raw=localStorage.getItem('customEquationLibrary');
+    customEquationLibrary=raw?JSON.parse(raw):[];
+    if(!Array.isArray(customEquationLibrary)) customEquationLibrary=[];
+  }catch(e){ customEquationLibrary=[]; }
+}
+
+function saveCustomEquationLibrary(){
+  try{ localStorage.setItem('customEquationLibrary', JSON.stringify(customEquationLibrary)); }
+  catch(e){ /* localStorage nedostupné — ignorovat, knihovna zůstane jen pro tuto session */ }
+}
+
+function renderCustomEquationDropdownItems(){
+  const sep=document.getElementById('custom-eq-library-sep');
+  const container=document.getElementById('custom-eq-library-items');
+  if(!container||!sep) return;
+  if(!customEquationLibrary.length){
+    sep.style.display='none';
+    container.innerHTML='';
+    return;
+  }
+  sep.style.display='block';
+  container.innerHTML=customEquationLibrary.map(eq=>`
+    <div class="rtype-option custom-saved" data-eq-id="${eq.id}" onclick="selectCustomEquationById('${eq.id}',this)">
+      <span class="eq-name">${escapeHtmlAttr(eq.name)}</span>
+      <button class="eq-remove" onclick="event.stopPropagation(); removeCustomEquation('${eq.id}')" title="Odebrat rovnici">🗑️</button>
+    </div>
+  `).join('');
+}
+
+function selectCustomEquation(formula, btnEl){
+  datasets[activeDatasetIdx].customFormula=formula;
+  const sel=document.getElementById('rType');
+  sel.value='custom';
+  document.querySelectorAll('.rtype-option').forEach(b=>b.classList.remove('selected'));
+  if(btnEl) btnEl.classList.add('selected');
+  document.getElementById('rtype-dropdown').classList.remove('open');
+  updateFourierUI(false);
+  updateGeneralEq();
+  recomputeKeepVis();
+}
+
+function selectCustomEquationById(id, btnEl){
+  const eq=customEquationLibrary.find(e=>e.id===id);
+  if(!eq) return;
+  selectCustomEquation(eq.formula, btnEl);
+}
+
+function removeCustomEquation(id){
+  const eq=customEquationLibrary.find(e=>e.id===id);
+  if(!eq) return;
+  if(!confirm(`Opravdu odebrat rovnici "${eq.name}"?`)) return;
+  customEquationLibrary=customEquationLibrary.filter(e=>e.id!==id);
+  saveCustomEquationLibrary();
+  renderCustomEquationDropdownItems();
+}
+
+function addCustomFormulaToLibrary(){
+  const input=document.getElementById('custom-formula-input');
+  const raw=(input?.value||'').trim();
+  const err=document.getElementById('custom-formula-error');
+  if(!raw){ if(err){err.textContent='⚠ Nejdřív napiš rovnici.'; err.style.display='block';} return; }
+  try{
+    const {paramNames}=buildCustomFitter(raw);
+    if(paramNames.length===0){
+      if(err){ err.textContent='⚠ Rovnice neobsahuje žádný parametr k fitování (jen x).'; err.style.display='block'; }
+      return;
+    }
+  }catch(e){
+    if(err){ err.textContent='⚠ '+e.message; err.style.display='block'; }
+    return;
+  }
+  const name=prompt('Zadejte název rovnice:', '');
+  if(name===null) return;
+  const trimmedName=name.trim();
+  if(!trimmedName) return;
+  const id='custom_'+Date.now()+'_'+Math.random().toString(36).slice(2,7);
+  customEquationLibrary.push({id, name:trimmedName, formula:raw});
+  saveCustomEquationLibrary();
+  renderCustomEquationDropdownItems();
+
+  const ds=datasets[activeDatasetIdx];
+  ds.customFormula=raw;
+  const btn=document.querySelector(`.rtype-option.custom-saved[data-eq-id="${id}"]`);
+  const sel=document.getElementById('rType');
+  sel.value='custom';
+  document.querySelectorAll('.rtype-option').forEach(b=>b.classList.remove('selected'));
+  if(btn) btn.classList.add('selected');
+  document.getElementById('rtype-dropdown').classList.remove('open');
+  updateFourierUI(false);
+  updateGeneralEq();
+  recomputeKeepVis();
   closeCustomFormulaModal();
 }
 
@@ -2644,6 +2776,8 @@ function getOverlayPos(e, overlay){
 
 document.addEventListener('DOMContentLoaded',()=>{
   renderTabsUI();
+  loadCustomEquationLibrary();
+  renderCustomEquationDropdownItems();
   const overlay=document.getElementById('sel-overlay');
 
   overlay.addEventListener('mousedown',e=>{
@@ -3754,6 +3888,10 @@ updateGeneralEq();
         <button onclick="closeCustomFormulaModal()"
           style="background:transparent;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 16px;cursor:pointer;font-family:'Sora',sans-serif;font-size:13px;">
           Zrušit
+        </button>
+        <button onclick="addCustomFormulaToLibrary()" title="Uložit rovnici do rychlého výběru pod vlastním názvem"
+          style="background:transparent;border:1px solid #7c3aed;color:#7c3aed;border-radius:8px;padding:8px 16px;cursor:pointer;font-family:'Sora',sans-serif;font-size:13px;font-weight:600;">
+          + Přidat
         </button>
         <button onclick="confirmCustomFormula()"
           style="background:#7c3aed;border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-family:'Sora',sans-serif;font-size:13px;font-weight:600;">
