@@ -6,6 +6,7 @@
 <title>Regresní analýza</title>
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg>">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mathjs@12.4.3/lib/browser/math.js"></script>
 <script>/*!
  * Chart.js v4.4.1
  * https://www.chartjs.org
@@ -215,6 +216,26 @@ select#rType:focus{border-color:var(--accent);}
   border-radius:6px;
   margin-left:8px;
 }
+.rtype-option.custom-beta{
+  position:relative;
+  background:linear-gradient(90deg, rgba(124,58,237,0.12), rgba(124,58,237,0.02));
+  border-left:3px solid #7c3aed;
+  font-weight:600;
+}
+.rtype-option.custom-beta:hover{background:linear-gradient(90deg, rgba(124,58,237,0.22), rgba(124,58,237,0.06));}
+.rtype-option.custom-beta.selected{color:#7c3aed;}
+.rtype-option.custom-beta::after{
+  content:'BETA';
+  float:right;
+  font-size:9px;
+  font-weight:700;
+  letter-spacing:.04em;
+  background:#7c3aed;
+  color:#fff;
+  padding:2px 6px;
+  border-radius:6px;
+  margin-left:8px;
+}
 .results-panel{
   flex:1;background:var(--surface);border:1px solid var(--border);
   border-radius:10px;padding:11px 13px;font-size:13px;
@@ -384,7 +405,7 @@ td input.cell:focus{
 <body>
 <div class="app">
   <header class="topbar" id="topBar">
-    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.2</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
+    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.3</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím.</span></div></div>
     <div class="spacer"></div>
     <button onclick="openNavod()"
       title="Návod k použití"
@@ -488,6 +509,7 @@ td input.cell:focus{
             <button class="rtype-option" onclick="selectRtype('gaussian3',this)">3× Gauss</button>
             <button class="rtype-option" onclick="selectRtype('rational',this)">Lomená lineární (y = (ax+b)/(cx+1))</button>
             <button class="rtype-option special" onclick="selectRtype('fourier',this)">Fourierova řada</button>
+            <button class="rtype-option custom-beta" onclick="openCustomFormulaModal()">Vlastní rovnice</button>
           </div>
         </div>
 
@@ -622,6 +644,7 @@ td input.cell:focus{
         <option value="gaussian3">3× Gauss</option>
         <option value="rational">Lomenná lineární</option>
         <option value="fourier">Fourierova řada (nastavitelné harm.)</option>
+        <option value="custom">Vlastní rovnice</option>
       </select>
 
       <div class="results-panel" id="resultsPanel">
@@ -677,6 +700,7 @@ function makeEmptyDataset(name){
     fourierHarmonics:3, fourierAutoHarmonics:true,
     fourierManualPeriodOn:false, fourierManualPeriod:null,
     hiddenSeries:{data:false, excl:false, fit:false, ci:false},
+    customFormula:null,
     lastResult:null, x:[], y:[], excl:[]
   };
 }
@@ -1509,7 +1533,8 @@ function getSessionState(){
       fourierHarmonics:ds.fourierHarmonics, fourierAutoHarmonics:ds.fourierAutoHarmonics,
       fourierManualPeriodOn:ds.fourierManualPeriodOn, fourierManualPeriod:ds.fourierManualPeriod,
       showCI:ds.showCI,
-      hiddenSeries:ds.hiddenSeries||{data:false,excl:false,fit:false,ci:false}
+      hiddenSeries:ds.hiddenSeries||{data:false,excl:false,fit:false,ci:false},
+      customFormula:ds.customFormula||null
     }))
   };
 }
@@ -1573,7 +1598,8 @@ function applySessionState(state){
     fourierManualPeriodOn:!!d.fourierManualPeriodOn,
     fourierManualPeriod:d.fourierManualPeriod||null,
     showCI:!!d.showCI,
-    hiddenSeries:Object.assign({data:false,excl:false,fit:false,ci:false}, d.hiddenSeries||{})
+    hiddenSeries:Object.assign({data:false,excl:false,fit:false,ci:false}, d.hiddenSeries||{}),
+    customFormula:d.customFormula||null
   }));
   activeDatasetIdx=Math.min(Math.max(state.activeDatasetIdx||0,0), datasets.length-1);
 
@@ -1589,7 +1615,7 @@ function applySessionState(state){
       fourierAutoHarmonics=ds.fourierAutoHarmonics;
       fourierManualPeriod=ds.fourierManualPeriod;
       try{
-        ds.lastResult=computeFitForType(x,y,ds.regressionType);
+        ds.lastResult=computeFitForType(x,y,ds.regressionType,ds);
         if(ds.regressionType==='fourier') ds.fourierHarmonics=fourierHarmonics;
       }catch(e){ ds.lastResult=null; }
     }
@@ -1714,6 +1740,68 @@ function updateFourierUI(isFourier){
     const el=document.getElementById(id);
     if(el) el.classList.toggle('fourier-active', isFourier);
   });
+}
+
+/* ══════════════════════════════════════════════
+   VLASTNÍ ROVNICE (beta)
+══════════════════════════════════════════════ */
+function openCustomFormulaModal(){
+  const ds=datasets[activeDatasetIdx];
+  const input=document.getElementById('custom-formula-input');
+  if(input) input.value=ds.customFormula||'';
+  document.getElementById('custom-formula-overlay').style.display='flex';
+  document.body.style.overflow='hidden';
+  const err=document.getElementById('custom-formula-error');
+  if(err) err.style.display='none';
+  updateCustomFormulaPreview();
+}
+
+function closeCustomFormulaModal(){
+  document.getElementById('custom-formula-overlay').style.display='none';
+  document.body.style.overflow='';
+}
+
+function updateCustomFormulaPreview(){
+  const input=document.getElementById('custom-formula-input');
+  const preview=document.getElementById('custom-formula-preview');
+  const err=document.getElementById('custom-formula-error');
+  const raw=(input?.value||'').trim();
+  if(!raw){
+    preview.innerHTML='<span style="color:var(--text-muted);font-size:13px;">Náhled rovnice se zobrazí tady…</span>';
+    if(err) err.style.display='none';
+    return;
+  }
+  try{
+    const node=math.parse(raw);
+    const tex='y = '+node.toTex();
+    katex.render(tex, preview, {throwOnError:true, displayMode:false});
+    if(err) err.style.display='none';
+  }catch(e){
+    preview.innerHTML='<span style="color:var(--text-muted);font-size:13px;">(rovnici zatím nejde vykreslit)</span>';
+    if(err){ err.textContent='⚠ '+e.message; err.style.display='block'; }
+  }
+}
+
+function confirmCustomFormula(){
+  const input=document.getElementById('custom-formula-input');
+  const raw=(input?.value||'').trim();
+  const err=document.getElementById('custom-formula-error');
+  if(!raw){ if(err){err.textContent='⚠ Zadej prosím nějakou rovnici.'; err.style.display='block';} return; }
+  try{
+    const {paramNames}=buildCustomFitter(raw);
+    if(paramNames.length===0){
+      if(err){ err.textContent='⚠ Rovnice neobsahuje žádný parametr k fitování (jen x).'; err.style.display='block'; }
+      return;
+    }
+  }catch(e){
+    if(err){ err.textContent='⚠ '+e.message; err.style.display='block'; }
+    return;
+  }
+  const ds=datasets[activeDatasetIdx];
+  ds.customFormula=raw;
+  const btn=[...document.querySelectorAll('.rtype-option')].find(b=>b.getAttribute('onclick')==='openCustomFormulaModal()');
+  if(btn) selectRtype('custom', btn);
+  closeCustomFormulaModal();
 }
 
 // Close dropdown when clicking outside
@@ -1903,9 +1991,20 @@ function updateGeneralEq(){
   const type=document.getElementById('rType').value;
   const el=document.getElementById('eq-general');
   if(!el) return;
-  const tex=(type==='fourier')
-    ? `y = a_0 + \\sum_{k=1}^{${fourierHarmonics}}\\left[a_k\\cos(k\\omega x) + b_k\\sin(k\\omega x)\\right]`
-    : (GENERAL_TEX[type]||'');
+  let tex;
+  if(type==='fourier'){
+    tex=`y = a_0 + \\sum_{k=1}^{${fourierHarmonics}}\\left[a_k\\cos(k\\omega x) + b_k\\sin(k\\omega x)\\right]`;
+  } else if(type==='custom'){
+    const ds=datasets[activeDatasetIdx];
+    if(ds && ds.customFormula){
+      try{ tex='y = '+math.parse(ds.customFormula).toTex(); }
+      catch(e){ tex='y = '+ds.customFormula; }
+    } else {
+      tex='\\text{(zadej vlastní rovnici)}';
+    }
+  } else {
+    tex=GENERAL_TEX[type]||'';
+  }
   try{
     katex.render(tex, el, {throwOnError:false, displayMode:false});
   }catch(e){
@@ -1972,7 +2071,79 @@ function showPointsOnly(){
   renderCombinedChart();
 }
 
-function computeFitForType(x, y, type){
+/* ══════════════════════════════════════════════
+   VLASTNÍ ROVNICE — obecný nelineární fit (beta)
+══════════════════════════════════════════════ */
+function buildCustomFitter(formula){
+  const node=math.parse(formula);
+  // Jména volaná jako funkce (sin(x), exp(x)...) jsou rezervovaná.
+  // Ostatní symboly (i kdyby náhodou kolidovaly se jménem konstanty jako
+  // "tau" nebo "e") se berou jako fitovací parametry.
+  const funcNames=new Set(node.filter(n=>n.type==='FunctionNode').map(n=>n.fn.name));
+  const allSymbols=[...new Set(node.filter(n=>n.isSymbolNode).map(n=>n.name))];
+  const paramNames=allSymbols.filter(s=>s!=='x' && !funcNames.has(s));
+  const compiled=node.compile();
+  const fn=(xi,p)=>{
+    const scope={x:xi};
+    paramNames.forEach((name,i)=>scope[name]=p[i]);
+    const v=compiled.evaluate(scope);
+    return (typeof v==='number' && isFinite(v)) ? v : NaN;
+  };
+  const jac=(xi,p)=>p.map((v,i)=>{
+    const h=1e-6*(Math.abs(v)||1);
+    const pPlus=[...p]; pPlus[i]=v+h;
+    const pMinus=[...p]; pMinus[i]=v-h;
+    return (fn(xi,pPlus)-fn(xi,pMinus))/(2*h);
+  });
+  return {paramNames,fn,jac,node};
+}
+
+function safeSSE(x,y,fn,p){
+  let s=0;
+  for(let i=0;i<x.length;i++){
+    const yp=fn(x[i],p);
+    if(!isFinite(yp)) return Infinity;
+    const r=y[i]-yp;
+    s+=r*r;
+  }
+  return s;
+}
+
+function doCustomFit(x,y,formula,nStarts=15){
+  const {paramNames,fn,jac}=buildCustomFitter(formula);
+  const m=paramNames.length;
+  if(x.length<m+1) throw new Error(`Rovnice s ${m} parametry vyžaduje alespoň ${m+1} bodů.`);
+  const p0=Array(m).fill(1);
+  let best=null,bestSSE=Infinity;
+  let seed=Date.now()%100000;
+  function rnd(){ seed=(seed*9301+49297)%233280; return seed/233280; }
+  for(let attempt=0;attempt<nStarts;attempt++){
+    const pStart=p0.map(v=>attempt===0?v:v*(0.4+rnd()*1.8)*(rnd()<0.15?-1:1));
+    let pOpt;
+    try{ pOpt=lmFit(x,y,pStart,fn,jac,800,1e-12); }catch(e){ continue; }
+    if(pOpt.some(v=>!isFinite(v))) continue;
+    const sse=safeSSE(x,y,fn,pOpt);
+    if(sse<bestSSE){ bestSSE=sse; best=pOpt; }
+  }
+  if(!best) throw new Error('Fit se nepodařilo najít — zkus jednodušší rovnici nebo zkontroluj syntaxi.');
+
+  const yp=x.map(xi=>fn(xi,best));
+  const r2=calcR2(y,yp);
+  const n=x.length;
+  const Jac=x.map(xi=>jac(xi,best));
+  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j)=>s+j[a]*j[b],0)));
+  const s2=sum(y.map((v,i)=>(v-yp[i])**2))/Math.max(n-m,1);
+  const Minv=invertMatrixGJ(JtJ);
+  const se=Minv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2)));
+
+  return {
+    type:'custom', formula, paramNames, params:best, se, r2, yp,
+    eq:`y = ${formula}`,
+    smooth:xi=>fn(xi,best)
+  };
+}
+
+function computeFitForType(x, y, type, ds){
   if(type==='linear')           return doLinear(x,y);
   if(type==='exponential')      return doExponential(x,y);
   if(type==='polynomial')       return doPolynomial(x,y);
@@ -1988,6 +2159,10 @@ function computeFitForType(x, y, type){
       return r;
     }
     return doFourier(x,y,fourierHarmonics, fourierManualPeriod);
+  }
+  if(type==='custom'){
+    if(!ds || !ds.customFormula) throw new Error('Nejdřív zadej vlastní rovnici (klikni na "Vlastní rovnice" v nabídce typu regrese).');
+    return doCustomFit(x,y,ds.customFormula);
   }
   throw new Error('Neznámý typ regrese.');
 }
@@ -2010,7 +2185,7 @@ function computeRegression(){
   const type=document.getElementById('rType').value;
   let result;
   try{
-    result=computeFitForType(x,y,type);
+    result=computeFitForType(x,y,type,ds);
     if(type==='fourier'){
       ds.fourierHarmonics=fourierHarmonics;
       const slider=document.getElementById('fourier-harmonics-slider');
@@ -2068,6 +2243,21 @@ function resultToTex(r){
     }
     return `y = ${parts.join(' + ')}`;
   }
+  if(r.type==='custom'){
+    try{
+      const node=math.parse(r.formula);
+      const handler=(node2, options)=>{
+        if(node2.isSymbolNode && r.paramNames.includes(node2.name)){
+          const idx=r.paramNames.indexOf(node2.name);
+          return n(r.params[idx]);
+        }
+        return undefined;
+      };
+      return 'y = '+node.toTex({handler});
+    }catch(e){
+      return r.eq;
+    }
+  }
   return r.eq;
 }
 
@@ -2115,6 +2305,10 @@ function displayResults(r, used, total){
       html+=`• ω = (${f6(r.omega)} ± ${f6(r.seOmega)}) rad<br>`
            +`• Perioda T = (${f6(r.period)} ± ${f6(r.sePeriod)})<br>`;
     }
+  } else if(r.type==='custom'){
+    r.paramNames.forEach((name,i)=>{
+      html+=`• ${name} = (${f6(r.params[i])} ± ${f6(r.se[i])})<br>`;
+    });
   } else {
     html+=`• a = (${f6(r.a)} ± ${f6(r.seA)})<br>`
          +`• b = (${f6(r.b)} ± ${f6(r.seB)})<br>`;
@@ -3527,6 +3721,45 @@ updateGeneralEq();
     </div>
     <div style="padding:16px 20px;flex:1;min-height:480px;">
       <canvas id="residuals-canvas"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- VLASTNÍ ROVNICE -->
+<div id="custom-formula-overlay" onclick="if(event.target===this)closeCustomFormulaModal()"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:560px;max-height:88vh;
+             display:flex;flex-direction:column;box-shadow:0 8px 40px rgba(0,0,0,.35);">
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border);flex-shrink:0;">
+      <span style="font-size:15px;font-weight:600;color:var(--text);">🧮 Vlastní rovnice <span style="font-size:10px;font-weight:700;background:#7c3aed;color:#fff;padding:2px 6px;border-radius:6px;margin-left:4px;">BETA</span></span>
+      <button onclick="closeCustomFormulaModal()" style="background:transparent;border:none;cursor:pointer;font-size:20px;color:var(--text-muted);line-height:1;padding:0 4px;"
+        onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text-muted)'">×</button>
+    </div>
+    <div style="padding:16px 20px;overflow-y:auto;">
+      <div style="font-size:12.5px;color:var(--text-muted);font-family:'Sora',sans-serif;margin-bottom:12px;line-height:1.5;">
+        Napiš vlastní rovnici pomocí <code>x</code> jako proměnné a libovolných písmen jako parametrů, které se budou fitovat
+        (např. <code>a*sin(b*x+c)+d</code> nebo <code>Vmax*x/(Km+x)</code>). Podporované funkce: <code>sin, cos, tan, exp, log, sqrt, abs</code> a základní operátory <code>+ - * / ^</code>.
+      </div>
+      <input type="text" id="custom-formula-input" placeholder="např. a*exp(-x/tau)+c"
+        style="width:100%;box-sizing:border-box;background:var(--btn);color:var(--text);border:1px solid var(--border);
+               border-radius:8px;padding:10px 12px;font-family:'Fira Code',monospace;font-size:14px;outline:none;"
+        oninput="updateCustomFormulaPreview()">
+      <div id="custom-formula-preview"
+        style="margin-top:14px;padding:16px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;
+               min-height:44px;display:flex;align-items:center;justify-content:center;font-size:16px;color:var(--text);overflow-x:auto;">
+        <span style="color:var(--text-muted);font-size:13px;">Náhled rovnice se zobrazí tady…</span>
+      </div>
+      <div id="custom-formula-error" style="margin-top:8px;font-size:12.5px;color:#c83030;display:none;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+        <button onclick="closeCustomFormulaModal()"
+          style="background:transparent;border:1px solid var(--border);color:var(--text);border-radius:8px;padding:8px 16px;cursor:pointer;font-family:'Sora',sans-serif;font-size:13px;">
+          Zrušit
+        </button>
+        <button onclick="confirmCustomFormula()"
+          style="background:#7c3aed;border:none;color:#fff;border-radius:8px;padding:8px 16px;cursor:pointer;font-family:'Sora',sans-serif;font-size:13px;font-weight:600;">
+          Potvrdit
+        </button>
+      </div>
     </div>
   </div>
 </div>
