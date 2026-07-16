@@ -24,3 +24,4 @@ Nad grafem se zobrazuje legenda, ve které mohou být celkem 4 pojmy: `Data` ozn
 - Verze `2.1` přidává navíc možnost zpracovat více sad dat najednou (maximálně však 5).
 - Verze `2.2` umožňuje aktuální stav analýzy uložit jako `.json` soubor a opětovně ho do aplikace nahrát.
 - Verze `2.3` doplňuje do aplikace možnost zadání vlastní fitované funkce (zatím jako betaverze).
+- Verze `2.4` přinesla zásadní změnu: došlo k rozdělení zdrojového kódu aplikace na více částí. Od této verze už tedy nebude možné aplikaci uložit jako jediný soubor a lokálně spustit.
