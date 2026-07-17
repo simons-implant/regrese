@@ -29,7 +29,8 @@ const POINT_STYLES = [
   {key:'circle',       label:'Kruh',                   icon:'●', chart:'circle',   rotation:0,   sizeMult:1},
   {key:'triangle',     label:'Trojúhelník',             icon:'▲', chart:'triangle', rotation:0,   sizeMult:1.35},
   {key:'triangleDown',label:'Obrácený trojúhelník',    icon:'▼', chart:'triangle', rotation:180, sizeMult:1.35},
-  {key:'rect',          label:'Čtverec',                 icon:'■', chart:'rect',     rotation:0,   sizeMult:1.15}
+  {key:'rect',          label:'Čtverec',                 icon:'■', chart:'rect',     rotation:0,   sizeMult:1.15},
+  {key:'diamond',      label:'Kosočtverec',             icon:'◆', chart:'rectRot',  rotation:0,   sizeMult:1.15}
 ];
 const POINT_STYLE_ICON = Object.fromEntries(POINT_STYLES.map(o=>[o.key,o.icon]));
 
