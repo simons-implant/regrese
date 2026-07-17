@@ -68,6 +68,17 @@ function escapeXml(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Sdílená SVG ikonka pro chybové/varovné hlášky (nahrazuje dřívější emoji ⚠/❗,
+// které se v tmavém režimu vykreslovaly nekonzistentně — currentColor se
+// naopak vždy napojí na barvu okolního textu v obou motivech).
+function errIconSvg(){
+  return '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1.5px;flex-shrink:0;"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg>';
+}
+
+function okIconSvg(){
+  return '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1.5px;flex-shrink:0;"><path d="M20 6 9 17l-5-5"/></svg>';
+}
+
 function captureTableRows(){
   const tb=document.getElementById('tbody');
   const rows=[];
@@ -706,6 +717,13 @@ function openCustomFormulaModal(){
   updateCustomFormulaPreview();
 }
 
+function showFormulaError(msg){
+  const err=document.getElementById('custom-formula-error');
+  if(!err) return;
+  err.innerHTML=errIconSvg()+' '+escapeHtmlAttr(msg);
+  err.style.display='block';
+}
+
 function closeCustomFormulaModal(){
   document.getElementById('custom-formula-overlay').style.display='none';
   document.body.style.overflow='';
@@ -728,7 +746,7 @@ function updateCustomFormulaPreview(){
     if(err) err.style.display='none';
   }catch(e){
     preview.innerHTML='<span style="color:var(--text-muted);font-size:13px;">(rovnici zatím nejde vykreslit)</span>';
-    if(err){ err.textContent='⚠ '+e.message; err.style.display='block'; }
+    if(err) showFormulaError(e.message);
   }
 }
 
@@ -736,15 +754,15 @@ function confirmCustomFormula(){
   const input=document.getElementById('custom-formula-input');
   const raw=(input?.value||'').trim();
   const err=document.getElementById('custom-formula-error');
-  if(!raw){ if(err){err.textContent='⚠ Zadej prosím nějakou rovnici.'; err.style.display='block';} return; }
+  if(!raw){ if(err) showFormulaError('Zadej prosím nějakou rovnici.'); return; }
   try{
     const {paramNames}=buildCustomFitter(raw);
     if(paramNames.length===0){
-      if(err){ err.textContent='⚠ Rovnice neobsahuje žádný parametr k fitování (jen x).'; err.style.display='block'; }
+      if(err) showFormulaError('Rovnice neobsahuje žádný parametr k fitování (jen x).');
       return;
     }
   }catch(e){
-    if(err){ err.textContent='⚠ '+e.message; err.style.display='block'; }
+    if(err) showFormulaError(e.message);
     return;
   }
   const ds=datasets[activeDatasetIdx];
@@ -819,15 +837,15 @@ function addCustomFormulaToLibrary(){
   const input=document.getElementById('custom-formula-input');
   const raw=(input?.value||'').trim();
   const err=document.getElementById('custom-formula-error');
-  if(!raw){ if(err){err.textContent='⚠ Nejdřív napiš rovnici.'; err.style.display='block';} return; }
+  if(!raw){ if(err) showFormulaError('Nejdřív napiš rovnici.'); return; }
   try{
     const {paramNames}=buildCustomFitter(raw);
     if(paramNames.length===0){
-      if(err){ err.textContent='⚠ Rovnice neobsahuje žádný parametr k fitování (jen x).'; err.style.display='block'; }
+      if(err) showFormulaError('Rovnice neobsahuje žádný parametr k fitování (jen x).');
       return;
     }
   }catch(e){
-    if(err){ err.textContent='⚠ '+e.message; err.style.display='block'; }
+    if(err) showFormulaError(e.message);
     return;
   }
   const name=prompt('Zadejte název rovnice:', '');
@@ -1158,7 +1176,7 @@ function computeRegression(){
   ds.x=x; ds.y=y; ds.excl=excl;
 
   if(x.length<2){
-    eqEl.innerHTML='<span class="err">❗ Zadejte alespoň 2 zaškrtnuté body.</span>';
+    eqEl.innerHTML='<span class="err">'+errIconSvg()+' Zadejte alespoň 2 zaškrtnuté body.</span>';
     pmEl.innerHTML='';
     ds.lastResult=null;
     renderCombinedChart();
@@ -1180,7 +1198,7 @@ function computeRegression(){
       lastFourierResult=result;
     }
   }catch(err){
-    eqEl.innerHTML=`<span class="err">❗ ${err.message}</span>`;
+    eqEl.innerHTML=`<span class="err">${errIconSvg()} ${escapeHtmlAttr(err.message)}</span>`;
     pmEl.innerHTML='';
     ds.lastResult=null;
     renderCombinedChart();
@@ -1388,6 +1406,32 @@ function toggleCombinePanel(){
   const btn=document.getElementById('btn-combine');
   if(panel) panel.classList.toggle('open', combineState.open);
   if(btn) btn.classList.toggle('active', combineState.open);
+  renderCombinedChart();
+}
+
+// Schová panel Nástroje na lištu (tlačítko "podtržítko" uvnitř panelu) —
+// analýza (zapnuté nástroje) zůstává beze změny běžet dál, stejně jako
+// při skrytí kliknutím na tlačítko "Nástroje".
+function hideToolsPanel(){
+  if(!combineState.open) return;
+  combineState.open=false;
+  const panel=document.getElementById('combine-panel');
+  const btn=document.getElementById('btn-combine');
+  if(panel) panel.classList.remove('open');
+  if(btn) btn.classList.remove('active');
+  renderCombinedChart();
+}
+
+// Zavře panel křížkem A VYPNE všechny nástroje (na rozdíl od hideToolsPanel).
+function closeToolsPanelAndDisable(){
+  combineState.open=false;
+  combineState.enabled=false;
+  integralState.enabled=false;
+  derivativeState.enabled=false;
+  const panel=document.getElementById('combine-panel');
+  const btn=document.getElementById('btn-combine');
+  if(panel) panel.classList.remove('open');
+  if(btn) btn.classList.remove('active');
   renderCombinedChart();
 }
 
@@ -2313,7 +2357,10 @@ function loadFile(input){
   const file=input.files[0];
   if(!file) return;
   const lbl=document.getElementById('file-label');
-  if(lbl){ lbl.textContent='📄 '+file.name; lbl.style.display='block'; }
+  if(lbl){
+    lbl.innerHTML='<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/></svg> '+escapeHtmlAttr(file.name);
+    lbl.style.display='block';
+  }
   datasets[activeDatasetIdx].fileLabel=file.name;
   renderTabsUI();
   input.value='';
@@ -2378,7 +2425,7 @@ function parseAndFill(text){
   updateMasterCheckbox();
   showPointsOnly();
   document.getElementById('resEq').innerHTML=
-    `<span style="color:var(--success)">✅ Načteno ${rows.length} bodů${dataStart?` · osy: ${headerX}, ${headerY}`:''}</span>`;
+    `<span style="color:var(--success)">${okIconSvg()} Načteno ${rows.length} bodů${dataStart?` · osy: ${escapeHtmlAttr(headerX)}, ${escapeHtmlAttr(headerY)}`:''}</span>`;
 }
 
 /* ══════════════════════════════════════════════
@@ -3373,7 +3420,7 @@ function advConfirm(){
   if(advFileName){ datasets[activeDatasetIdx].fileLabel=advFileName; renderTabsUI(); }
   showPointsOnly();
   document.getElementById('resEq').innerHTML=
-    `<span style="color:var(--success)">✅ Načteno ${xVals.length} bodů · osy: ${labelX}, ${labelY}</span>`;
+    `<span style="color:var(--success)">${okIconSvg()} Načteno ${xVals.length} bodů · osy: ${escapeHtmlAttr(labelX)}, ${escapeHtmlAttr(labelY)}</span>`;
 
   closeAdv();
 }
