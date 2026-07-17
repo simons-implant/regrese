@@ -24,6 +24,19 @@ const DATASET_COLORS = [
   {point:'#e05c8a', fit:'#c02a5f', ciBorder:'rgba(192,42,95,0.45)',  ciBg:'rgba(192,42,95,0.16)',  excl:'#e05c8a'}
 ];
 
+/* ── Typy bodů pro jednotlivé datasety ── */
+const POINT_STYLES = [
+  {key:'circle',       label:'Kruh',                   icon:'●', chart:'circle',   rotation:0,   sizeMult:1},
+  {key:'triangle',     label:'Trojúhelník',             icon:'▲', chart:'triangle', rotation:0,   sizeMult:1.35},
+  {key:'triangleDown',label:'Obrácený trojúhelník',    icon:'▼', chart:'triangle', rotation:180, sizeMult:1.35},
+  {key:'rect',          label:'Čtverec',                 icon:'■', chart:'rect',     rotation:0,   sizeMult:1.15}
+];
+const POINT_STYLE_ICON = Object.fromEntries(POINT_STYLES.map(o=>[o.key,o.icon]));
+
+function getPointStyleMeta(key){
+  return POINT_STYLES.find(o=>o.key===key) || POINT_STYLES[0];
+}
+
 function makeEmptyDataset(name){
   return {
     name, fileLabel:null,
@@ -33,13 +46,17 @@ function makeEmptyDataset(name){
     fourierHarmonics:3, fourierAutoHarmonics:true,
     fourierManualPeriodOn:false, fourierManualPeriod:null,
     hiddenSeries:{data:false, excl:false, fit:false, ci:false},
-    customFormula:null,
+    customFormula:null, pointStyle:'circle',
     lastResult:null, x:[], y:[], excl:[]
   };
 }
 
 function escapeHtmlAttr(s){
   return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+}
+
+function escapeXml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function captureTableRows(){
@@ -83,9 +100,18 @@ function renderTabsUI(){
   datasets.forEach((ds,i)=>{
     const col=DATASET_COLORS[i%DATASET_COLORS.length];
     const label=ds.fileLabel ? `${ds.name}: ${ds.fileLabel}` : ds.name;
-    html+=`<div class="ds-tab${i===activeDatasetIdx?' active':''}" onclick="switchDataset(${i})" title="${label.replace(/"/g,'&quot;')}">`
-        + `<span class="ds-dot" style="background:${col.point};"></span>`
-        + `<span class="ds-label">${label}</span>`
+    const pStyle=ds.pointStyle||'circle';
+    html+=`<div class="ds-row">`
+        + `<div class="ds-tab${i===activeDatasetIdx?' active':''}" onclick="switchDataset(${i})" title="${label.replace(/"/g,'&quot;')}">`
+        +   `<span class="ds-dot" style="background:${col.point};"></span>`
+        +   `<span class="ds-label">${label}</span>`
+        + `</div>`
+        + `<div class="ds-point-wrap">`
+        +   `<button class="ds-point-btn" onclick="event.stopPropagation(); toggleDsPointDropdown(${i})" title="Typ bodu grafu">${POINT_STYLE_ICON[pStyle]||'●'}</button>`
+        +   `<div class="ds-point-dropdown" id="ds-point-dropdown-${i}">`
+        +     POINT_STYLES.map(o=>`<button class="ds-point-option${pStyle===o.key?' selected':''}" onclick="event.stopPropagation(); selectDsPointStyle(${i},'${o.key}')">${o.icon}&nbsp;&nbsp;${o.label}</button>`).join('')
+        +   `</div>`
+        + `</div>`
         + `</div>`;
   });
   wrap.innerHTML=html;
@@ -102,6 +128,21 @@ function renderTabsUI(){
     const nWithData=datasets.filter(ds=>ds.x.length>0||ds.excl.length>0).length;
     saveAllBtn.style.display=nWithData>=2?'inline-flex':'none';
   }
+}
+
+function toggleDsPointDropdown(idx){
+  const dd=document.getElementById('ds-point-dropdown-'+idx);
+  if(!dd) return;
+  const wasOpen=dd.classList.contains('open');
+  document.querySelectorAll('.ds-point-dropdown.open').forEach(d=>d.classList.remove('open'));
+  if(!wasOpen) dd.classList.add('open');
+}
+
+function selectDsPointStyle(idx, style){
+  datasets[idx].pointStyle=style;
+  document.querySelectorAll('.ds-point-dropdown.open').forEach(d=>d.classList.remove('open'));
+  renderTabsUI();
+  renderCombinedChart();
 }
 
 function syncRtypeUI(type){
@@ -384,7 +425,8 @@ function getSessionState(){
       fourierManualPeriodOn:ds.fourierManualPeriodOn, fourierManualPeriod:ds.fourierManualPeriod,
       showCI:ds.showCI,
       hiddenSeries:ds.hiddenSeries||{data:false,excl:false,fit:false,ci:false},
-      customFormula:ds.customFormula||null
+      customFormula:ds.customFormula||null,
+      pointStyle:ds.pointStyle||'circle'
     }))
   };
 }
@@ -464,7 +506,8 @@ function applySessionState(state){
     fourierManualPeriod:d.fourierManualPeriod||null,
     showCI:!!d.showCI,
     hiddenSeries:Object.assign({data:false,excl:false,fit:false,ci:false}, d.hiddenSeries||{}),
-    customFormula:d.customFormula||null
+    customFormula:d.customFormula||null,
+    pointStyle:d.pointStyle||'circle'
   }));
   activeDatasetIdx=Math.min(Math.max(state.activeDatasetIdx||0,0), datasets.length-1);
 
@@ -773,6 +816,9 @@ document.addEventListener('click',e=>{
   const wrap=document.getElementById('rtype-wrap');
   if(wrap && !wrap.contains(e.target)){
     document.getElementById('rtype-dropdown')?.classList.remove('open');
+  }
+  if(!e.target.closest('.ds-point-wrap')){
+    document.querySelectorAll('.ds-point-dropdown.open').forEach(d=>d.classList.remove('open'));
   }
 });
 
@@ -1273,12 +1319,15 @@ function renderCombinedChart(){
     const {x,y,excl,lastResult:result}=ds;
     if(!ds.hiddenSeries) ds.hiddenSeries={data:false,excl:false,fit:false,ci:false};
 
+    const ptMeta=getPointStyleMeta(ds.pointStyle);
+
     if(excl.length>0){
       combinedDatasets.push({
         type:'scatter',label:`Vyloučeno${suffix} (${excl.length})`,
         data:excl.map(p=>({x:p[0],y:p[1]})),
         backgroundColor:'transparent',borderColor:col.excl,
-        pointStyle:'circle',pointRadius:6,pointBorderWidth:2,order:3,
+        pointStyle:ptMeta.chart,rotation:ptMeta.rotation,
+        pointRadius:6*ptMeta.sizeMult,pointBorderWidth:2,order:3,
         _dsIdx:i,_kind:'excl',hidden:!!ds.hiddenSeries.excl
       });
     }
@@ -1288,7 +1337,8 @@ function renderCombinedChart(){
         type:'scatter',label:`Data${suffix}`,
         data:x.map((xi,idx)=>({x:xi,y:y[idx]})),
         backgroundColor:col.point,borderColor:'rgba(255,255,255,.7)',
-        borderWidth:1.5,pointRadius:6,order:3,
+        borderWidth:1.5,pointRadius:6*ptMeta.sizeMult,order:3,
+        pointStyle:ptMeta.chart,rotation:ptMeta.rotation,
         _dsIdx:i,_kind:'data',hidden:!!ds.hiddenSeries.data
       });
     }
@@ -1647,332 +1697,175 @@ function clearData(){
   recomputeKeepVis();
 }
 
-function saveGraph(){
-  if(!lastResult||!lastData){alert('Nejprve proveďte regresi.');return;}
-  const {x,y,excl}=lastData, result=lastResult;
-  const col=DATASET_COLORS[activeDatasetIdx%DATASET_COLORS.length];
-
-  // Přečti viditelnost datasetů z aktuálního grafu
-  const visibility = chartInst
-    ? chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i))
-    : [];
-
-  // 2× rozlišení pro ostrost
-  const tmp=document.createElement('canvas');
-  tmp.width=2700; tmp.height=1800;
-  document.body.appendChild(tmp);
-
-  const lc={bg:'#fafafa',grid:'rgba(0,0,0,.07)',tick:'#33334a',axis:'#cccccc'};
-
-  const xMin=Math.min(...x),xMax=Math.max(...x);
-  const step=(xMax-xMin)/399||1;
-  const xSmooth=Array.from({length:400},(_,i)=>xMin+i*step);
-  let ySmooth;
-  try{ySmooth=xSmooth.map(result.smooth);}catch(e){ySmooth=xSmooth.map(()=>NaN);}
-
-  // Sestavuj datasety ve stejném pořadí jako v živém grafu
-  const allDs=[];
-  if(excl.length>0) allDs.push({
-    type:'scatter',label:`Vyloučeno (${excl.length})`,
-    data:excl.map(p=>({x:p[0],y:p[1]})),
-    backgroundColor:'transparent',borderColor:col.excl,
-    pointStyle:'circle',pointRadius:18,pointBorderWidth:4,order:1
-  });
-  allDs.push({
-    type:'scatter',label:'Data',
-    data:x.map((xi,i)=>({x:xi,y:y[i]})),
-    backgroundColor:col.point,borderColor:'rgba(0,0,0,.25)',
-    borderWidth:4,pointRadius:18,order:2
-  });
-  allDs.push({
-    type:'line',label:'fit',
-    data:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]})),
-    borderColor:col.fit,borderWidth:7,pointRadius:0,fill:false,tension:0,order:3
-  });
-
-  // CI pás — stejný výpočet jako v renderCombinedChart
-  if(showCI && result.yp){
-    const n=x.length;
-    const p = result.type==='polynomial'?3 : result.type==='gaussian'?4 :
-              result.type==='gaussian2'?7 : result.type==='gaussian3'?10 :
-              result.type==='rational'?3 : 2;
-    const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
-    const tCrit = n>30 ? 1.96 : n>10 ? 2.228 : 2.776;
-    let ciUpper, ciLower;
-    if(result.type==='linear'){
-      const xMean=x.reduce((s,v)=>s+v,0)/n;
-      const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
-      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
-      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}));
-    } else if(result.type==='fourier' && result.covMatrix && result.jacFn){
-      const cov=result.covMatrix;
-      const seY=xSmooth.map(xi=>{
-        const jv=result.jacFn(xi);
-        let s2=0;
-        for(let i=0;i<jv.length;i++) for(let j=0;j<jv.length;j++) s2+=jv[i]*cov[i][j]*jv[j];
-        return Math.sqrt(Math.max(0,s2));
-      });
-      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*seY[i]}));
-      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*seY[i]}));
-    } else {
-      ciUpper=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse}));
-      ciLower=xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse}));
-    }
-    allDs.push({
-      type:'line',label:'IS 95 %',data:ciUpper,
-      borderColor:col.ciBorder,backgroundColor:col.ciBg,
-      borderWidth:1,borderDash:[4,3],pointRadius:0,fill:'+1',tension:0,order:4,
-      pointStyle:'rect'
-    });
-    allDs.push({
-      type:'line',label:'_ciLower',data:ciLower,
-      borderColor:col.ciBorder,backgroundColor:col.ciBg,
-      borderWidth:1,borderDash:[4,3],pointRadius:0,fill:false,tension:0,order:5
-    });
-  }
-
-  // Aplikuj viditelnost — skryté datasety úplně vynech
-  const ds=allDs.filter((d,i)=>!(visibility.length>i && !visibility[i]));
-
-  const ec=new Chart(tmp,{
-    type:'scatter',data:{datasets:ds},
-    options:{
-      responsive:false,animation:false,
-      scales:{
-        x:{type:'linear',grid:{color:lc.grid},
-           ticks:{color:lc.tick,font:{family:'Fira Code',size:33}},
-           border:{color:lc.axis},
-           title:{display:true,text:axisLabels.x,color:lc.tick,font:{family:'Sora',size:36}}},
-        y:{type:'linear',grid:{color:lc.grid},
-           ticks:{color:lc.tick,font:{family:'Fira Code',size:33}},
-           border:{color:lc.axis},
-           title:{display:true,text:axisLabels.y,color:lc.tick,font:{family:'Sora',size:36}}}
-      },
-      plugins:{
-        legend:{labels:{color:lc.tick,usePointStyle:true,
-                        font:{family:'Sora',size:33},boxWidth:30,padding:42,
-                        filter:item=>item.text!=='_ciLower'}},
-        tooltip:{enabled:false}
-      }
-    },
-    plugins:[{id:'bg',beforeDraw(ch){
-      const{ctx:c2,chartArea:ca}=ch;
-      if(!ca) return;
-      c2.save();c2.fillStyle='#ffffff';
-      c2.fillRect(0,0,tmp.width,tmp.height);
-      c2.restore();
-    }}]
-  });
-
-  setTimeout(()=>{
-    const a=document.createElement('a');
-    a.href=tmp.toDataURL('image/png');
-    a.download='regrese.png';
-    a.click();
-    ec.destroy();
-    document.body.removeChild(tmp);
-  },120);
-}
-
-function saveGraphAll(){
-  const activeDatasets=datasets
-    .map((ds,i)=>({ds,i}))
-    .filter(({ds})=>ds.x.length>0||ds.excl.length>0);
-  if(activeDatasets.length<2){ alert('Pro export všech dat najednou potřebuješ alespoň 2 sady dat s daty.'); return; }
-
-  const multi=true;
-  const tmp=document.createElement('canvas');
-  tmp.width=2700; tmp.height=1800;
-  document.body.appendChild(tmp);
-  const lc={bg:'#fafafa',grid:'rgba(0,0,0,.07)',tick:'#33334a',axis:'#cccccc'};
-
-  const allDs=[];
-  activeDatasets.forEach(({ds,i})=>{
-    const col=DATASET_COLORS[i%DATASET_COLORS.length];
-    const suffix=` (${ds.name})`;
-    const {x,y,excl,lastResult:result}=ds;
-
-    if(excl.length>0) allDs.push({
-      type:'scatter',label:`Vyloučeno${suffix} (${excl.length})`,
-      data:excl.map(p=>({x:p[0],y:p[1]})),
-      backgroundColor:'transparent',borderColor:col.excl,
-      pointStyle:'circle',pointRadius:18,pointBorderWidth:4,order:1
-    });
-    if(x.length>0) allDs.push({
-      type:'scatter',label:`Data${suffix}`,
-      data:x.map((xi,k)=>({x:xi,y:y[k]})),
-      backgroundColor:col.point,borderColor:'rgba(0,0,0,.25)',
-      borderWidth:4,pointRadius:18,order:2
-    });
-    if(result && x.length>0){
-      const xMin=Math.min(...x), xMax=Math.max(...x);
-      const step=(xMax-xMin)/399||1;
-      const xSmooth=Array.from({length:400},(_,k)=>xMin+k*step);
-      let ySmooth;
-      try{ ySmooth=xSmooth.map(result.smooth); }catch(e){ ySmooth=xSmooth.map(()=>NaN); }
-      allDs.push({
-        type:'line',label:`fit${suffix}`,
-        data:xSmooth.map((xi,k)=>({x:xi,y:ySmooth[k]})),
-        borderColor:col.fit,borderWidth:7,pointRadius:0,fill:false,tension:0,order:3
-      });
-      const dsUseCI=(i===activeDatasetIdx)?showCI:ds.showCI;
-      const ci=buildCiBand(result,x,y,xSmooth,ySmooth,dsUseCI);
-      if(ci){
-        allDs.push({
-          type:'line',label:`IS 95 %${suffix}`,data:ci.upper,
-          borderColor:col.ciBorder,backgroundColor:col.ciBg,
-          borderWidth:1,borderDash:[4,3],pointRadius:0,fill:'+1',tension:0,order:4,
-          pointStyle:'rect'
-        });
-        allDs.push({
-          type:'line',label:`_ciLower${suffix}`,data:ci.lower,
-          borderColor:col.ciBorder,backgroundColor:col.ciBg,
-          borderWidth:1,borderDash:[4,3],pointRadius:0,fill:false,tension:0,order:5
-        });
-      }
-    }
-  });
-
-  const activeLabels=datasets[activeDatasetIdx];
-  const ec=new Chart(tmp,{
-    type:'scatter',data:{datasets:allDs},
-    options:{
-      responsive:false,animation:false,
-      scales:{
-        x:{type:'linear',grid:{color:lc.grid},
-           ticks:{color:lc.tick,font:{family:'Fira Code',size:33}},
-           border:{color:lc.axis},
-           title:{display:true,text:activeLabels.xLabel,color:lc.tick,font:{family:'Sora',size:36}}},
-        y:{type:'linear',grid:{color:lc.grid},
-           ticks:{color:lc.tick,font:{family:'Fira Code',size:33}},
-           border:{color:lc.axis},
-           title:{display:true,text:activeLabels.yLabel,color:lc.tick,font:{family:'Sora',size:36}}}
-      },
-      plugins:{
-        legend:{labels:{color:lc.tick,usePointStyle:true,
-                        font:{family:'Sora',size:30},boxWidth:28,padding:36,
-                        filter:item=>!item.text.startsWith('_ciLower')}},
-        tooltip:{enabled:false}
-      }
-    },
-    plugins:[{id:'bg',beforeDraw(ch){
-      const{ctx:c2,chartArea:ca}=ch;
-      if(!ca) return;
-      c2.save();c2.fillStyle='#ffffff';
-      c2.fillRect(0,0,tmp.width,tmp.height);
-      c2.restore();
-    }}]
-  });
-
-  setTimeout(()=>{
-    const a=document.createElement('a');
-    a.href=tmp.toDataURL('image/png');
-    a.download='regrese_vsechna_data.png';
-    a.click();
-    ec.destroy();
-    document.body.removeChild(tmp);
-  },120);
-}
-
 /* ══════════════════════════════════════════════
    SVG EXPORT
+   Export je čistě vektorový (PNG export byl odstraněn).
+   Legenda i barvy/tvary bodů se čtou přímo z živého Chart.js
+   grafu (chart.options.plugins.legend.labels.generateLabels),
+   aby export vždy vypadal přesně jako náhled v appce.
 ══════════════════════════════════════════════ */
-function saveGraphSVG(){
-  const {x,y,excl}=lastData, result=lastResult;
-  const visibility=chartInst?chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i)):[];
-  const col=DATASET_COLORS[activeDatasetIdx%DATASET_COLORS.length];
-
-  const W=900,H=600,ml=60,mr=30,mt=20,mb=60;
-  const pw=W-ml-mr, ph=H-mt-mb;
-
-  const allXvals=[...x,...excl.map(p=>p[0])];
-  const allYvals=[...y,...excl.map(p=>p[1])];
-  // Použij rozsahy přímo z živého grafu — stejné jako co vidí uživatel
-  const xMin=chartInst.scales.x.min, xMax=chartInst.scales.x.max;
-  const yMin=chartInst.scales.y.min, yMax=chartInst.scales.y.max;
-  // Křivka jen přes zahrnuté body
-  const xSmoothMin=Math.min(...x), xSmoothMax=Math.max(...x);
-  const step=(xSmoothMax-xSmoothMin)/399||1;
-  const xSmooth=Array.from({length:400},(_,i)=>xSmoothMin+i*step);
-  let ySmooth;
-  try{ySmooth=xSmooth.map(result.smooth);}catch(e){ySmooth=xSmooth.map(()=>NaN);}
-  const yRange=yMax-yMin||1, xRange=xMax-xMin||1;
-
-  const px=v=>ml+(v-xMin)/xRange*pw;
-  const py=v=>mt+ph-(v-yMin)/yRange*ph;
-
-  // Build dataset list matching live chart order
-  const datasets=[];
-  if(excl.length>0) datasets.push({type:'excl',pts:excl});
-  datasets.push({type:'data',pts:x.map((xi,i)=>[xi,y[i]])});
-  datasets.push({type:'line',pts:xSmooth.map((xi,i)=>[xi,ySmooth[i]])});
-
-  // CI pro SVG — zobraz jen pokud je pro tuto (aktivní) záložku zapnuté IS 95%
-  const ciVisible=showCI;
-  let ciSVG=null;
-  if(ciVisible && result.yp){
-    const n=x.length;
-    const p=result.type==='polynomial'?3:result.type==='gaussian'?4:result.type==='gaussian2'?7:result.type==='gaussian3'?10:result.type==='rational'?3:2;
-    const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
-    const tCrit=n>30?1.96:n>10?2.228:2.776;
-    let upper,lower;
-    if(result.type==='linear'){
-      const xMean=x.reduce((s,v)=>s+v,0)/n;
-      const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
-      upper=xSmooth.map((xi,i)=>[xi,ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)]);
-      lower=xSmooth.map((xi,i)=>[xi,ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)]);
-    } else if(result.type==='fourier' && result.covMatrix && result.jacFn){
-      const cov=result.covMatrix;
-      const seY=xSmooth.map(xi=>{
-        const jv=result.jacFn(xi);
-        let s2=0;
-        for(let i=0;i<jv.length;i++) for(let j=0;j<jv.length;j++) s2+=jv[i]*cov[i][j]*jv[j];
-        return Math.sqrt(Math.max(0,s2));
-      });
-      upper=xSmooth.map((xi,i)=>[xi,ySmooth[i]+tCrit*seY[i]]);
-      lower=xSmooth.map((xi,i)=>[xi,ySmooth[i]-tCrit*seY[i]]);
-    } else {
-      upper=xSmooth.map((xi,i)=>[xi,ySmooth[i]+tCrit*rmse]);
-      lower=xSmooth.map((xi,i)=>[xi,ySmooth[i]-tCrit*rmse]);
-    }
-    ciSVG={upper,lower};
+function svgChartPointShape(pointStyle, rotation, cx, cy, r, fill, stroke, strokeWidth){
+  rotation = rotation || 0;
+  if(pointStyle==='rect' || pointStyle==='rectRounded'){
+    const s=r*1.7;
+    return `<rect x="${(cx-s/2).toFixed(1)}" y="${(cy-s/2).toFixed(1)}" width="${s.toFixed(1)}" height="${s.toFixed(1)}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
   }
+  if(pointStyle==='rectRot'){
+    const s=r*1.3;
+    const pts=[[cx,cy-s],[cx+s,cy],[cx,cy+s],[cx-s,cy]];
+    const d=pts.map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+    return `<polygon points="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
+  }
+  if(pointStyle==='triangle'){
+    const h=r*1.9, w=r*1.9;
+    const pts = Math.abs(rotation-180)<1
+      ? [[cx,cy+h*0.55],[cx-w*0.5,cy-h*0.45],[cx+w*0.5,cy-h*0.45]]
+      : [[cx,cy-h*0.55],[cx-w*0.5,cy+h*0.45],[cx+w*0.5,cy+h*0.45]];
+    const d=pts.map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+    return `<polygon points="${d}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
+  }
+  if(pointStyle==='line' || pointStyle==='dash'){
+    return `<line x1="${(cx-r*1.4).toFixed(1)}" y1="${cy.toFixed(1)}" x2="${(cx+r*1.4).toFixed(1)}" y2="${cy.toFixed(1)}" stroke="${stroke||fill}" stroke-width="${strokeWidth||2.5}"/>`;
+  }
+  // circle a vše ostatní (cross, star…) → kruhová značka
+  return `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="${strokeWidth}"/>`;
+}
 
-  let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" font-family="'Sora',sans-serif">`;
-  svg+=`<rect width="${W}" height="${H}" fill="#ffffff"/>`;
+function svgShape(styleKey, cx, cy, rBase, fill, stroke, strokeWidth){
+  const meta=getPointStyleMeta(styleKey);
+  return svgChartPointShape(meta.chart, meta.rotation, cx, cy, rBase*meta.sizeMult, fill, stroke, strokeWidth);
+}
+
+function svgAxesAndGrid(ml, mt, pw, ph, xMin, xMax, yMin, yMax){
+  let svg='';
   svg+=`<rect x="${ml}" y="${mt}" width="${pw}" height="${ph}" fill="#fafafa"/>`;
-
-  // Grid lines (5 each)
+  const xRange=xMax-xMin||1, yRange=yMax-yMin||1;
   for(let i=0;i<=5;i++){
     const gy=mt+i*ph/5;
     const gx=ml+i*pw/5;
     svg+=`<line x1="${ml}" y1="${gy}" x2="${ml+pw}" y2="${gy}" stroke="rgba(0,0,0,0.07)" stroke-width="1"/>`;
     svg+=`<line x1="${gx}" y1="${mt}" x2="${gx}" y2="${mt+ph}" stroke="rgba(0,0,0,0.07)" stroke-width="1"/>`;
-    // Tick labels
     const yVal=(yMin+((5-i)/5)*yRange).toPrecision(4);
     const xVal=(xMin+(i/5)*xRange).toPrecision(4);
     svg+=`<text x="${ml-6}" y="${gy+4}" text-anchor="end" font-size="11" fill="#444456" font-family="'Fira Code',monospace">${yVal}</text>`;
     svg+=`<text x="${gx}" y="${mt+ph+16}" text-anchor="middle" font-size="11" fill="#444456" font-family="'Fira Code',monospace">${xVal}</text>`;
   }
-
-  // Axes
   svg+=`<line x1="${ml}" y1="${mt}" x2="${ml}" y2="${mt+ph}" stroke="#cccccc" stroke-width="1.5"/>`;
   svg+=`<line x1="${ml}" y1="${mt+ph}" x2="${ml+pw}" y2="${mt+ph}" stroke="#cccccc" stroke-width="1.5"/>`;
+  return svg;
+}
 
-  // Axis labels
-  svg+=`<text x="${ml+pw/2}" y="${H-8}" text-anchor="middle" font-size="12" fill="#444456">${axisLabels.x}</text>`;
-  svg+=`<text x="14" y="${mt+ph/2}" text-anchor="middle" font-size="12" fill="#444456" transform="rotate(-90,14,${mt+ph/2})">${axisLabels.y}</text>`;
+function svgAxisTitles(W, H, ml, mt, pw, ph, xLabel, yLabel){
+  let svg='';
+  svg+=`<text x="${ml+pw/2}" y="${H-8}" text-anchor="middle" font-size="12" fill="#444456">${escapeXml(xLabel)}</text>`;
+  svg+=`<text x="14" y="${mt+ph/2}" text-anchor="middle" font-size="12" fill="#444456" transform="rotate(-90,14,${mt+ph/2})">${escapeXml(yLabel)}</text>`;
+  return svg;
+}
 
-  // Datasets
-  // Nejdřív CI pás (pod křivkou)
-  if(ciSVG){
-    // Ořízni body na oblast grafu
-    const clip=([xi,yi])=>[
-      Math.max(ml, Math.min(ml+pw, px(xi))),
-      Math.max(mt, Math.min(mt+ph, py(yi)))
-    ];
-    const uPts=ciSVG.upper.filter(p=>isFinite(p[1])).map(clip);
-    const lPts=ciSVG.lower.filter(p=>isFinite(p[1])).map(clip).reverse();
+// Sestaví legendu úplně stejně, jako to dělá živý Chart.js graf
+// (generateLabels + jeho vlastní filter), jen omezenou na vybrané datasety
+// a jen na aktuálně viditelné položky — zaručuje shodu s náhledem v appce.
+function getVisibleLegendItems(dsIdxList){
+  if(!chartInst) return [];
+  const labelOpts=chartInst.options?.plugins?.legend?.labels;
+  if(!labelOpts || typeof labelOpts.generateLabels!=='function') return [];
+  let items=labelOpts.generateLabels(chartInst) || [];
+  if(typeof labelOpts.filter==='function'){
+    items=items.filter(it=>labelOpts.filter(it, chartInst.data));
+  }
+  return items.filter(it=>{
+    const dsCfg=chartInst.data.datasets[it.datasetIndex];
+    if(!dsCfg || dsCfg._dsIdx===undefined) return false;
+    if(!dsIdxList.includes(dsCfg._dsIdx)) return false;
+    return !it.hidden;
+  });
+}
+
+function layoutLegendRows(items, availW){
+  const itemW=it=>String(it.text).length*6.5+40;
+  const rows=[]; let curRow=[], curW=0;
+  items.forEach(it=>{
+    const w=itemW(it);
+    if(curRow.length && curW+w>availW){ rows.push(curRow); curRow=[]; curW=0; }
+    curRow.push(it); curW+=w;
+  });
+  if(curRow.length) rows.push(curRow);
+  return rows;
+}
+
+function svgLegendRows(rows, W){
+  const itemW=it=>String(it.text).length*6.5+40;
+  const rowH=20;
+  let svg='';
+  rows.forEach((row,ri)=>{
+    const rowWidth=row.reduce((s,it)=>s+itemW(it),0);
+    let lx=(W-rowWidth)/2;
+    const ly=16+ri*rowH;
+    row.forEach(it=>{
+      const fill=it.fillStyle || 'transparent';
+      const stroke=it.strokeStyle || '#444456';
+      const lw=it.lineWidth || 1.5;
+      svg+=svgChartPointShape(it.pointStyle, it.rotation, lx+7, ly, 5, fill, stroke, lw);
+      svg+=`<text x="${lx+24}" y="${ly+4}" font-size="11" fill="#444456">${escapeXml(it.text)}</text>`;
+      lx+=itemW(it);
+    });
+  });
+  return svg;
+}
+
+function saveGraphSVG(){
+  if(!lastResult || !lastData || !chartInst){ alert('Nejprve proveďte regresi.'); return; }
+  const {x,y,excl}=lastData, result=lastResult;
+  const activeDs=datasets[activeDatasetIdx];
+  const col=DATASET_COLORS[activeDatasetIdx%DATASET_COLORS.length];
+  const ptMeta=getPointStyleMeta(activeDs.pointStyle);
+
+  // Zjisti viditelnost jednotlivých sérií aktivního datasetu přímo podle
+  // metadat v živém grafu (_dsIdx/_kind) — spolehlivé i s více sadami dat,
+  // na rozdíl od dřívějšího odhadu podle pozice v poli.
+  const findVis=kind=>{
+    const idx=chartInst.data.datasets.findIndex(d=>d._dsIdx===activeDatasetIdx && d._kind===kind);
+    return idx<0 ? true : chartInst.isDatasetVisible(idx);
+  };
+  const dataVisible = x.length>0 && findVis('data');
+  const exclVisible = excl.length>0 && findVis('excl');
+  const fitVisible = findVis('fit');
+  const ciItemVisible = findVis('ci');
+
+  // Použij rozsahy přímo z živého grafu — stejné jako co vidí uživatel
+  const xMin=chartInst.scales.x.min, xMax=chartInst.scales.x.max;
+  const yMin=chartInst.scales.y.min, yMax=chartInst.scales.y.max;
+  const xSmoothMin=Math.min(...x), xSmoothMax=Math.max(...x);
+  const step=(xSmoothMax-xSmoothMin)/399||1;
+  const xSmooth=Array.from({length:400},(_,i)=>xSmoothMin+i*step);
+  let ySmooth;
+  try{ySmooth=xSmooth.map(result.smooth);}catch(e){ySmooth=xSmooth.map(()=>NaN);}
+
+  const ci=buildCiBand(result, x, y, xSmooth, ySmooth, showCI && ciItemVisible);
+  const ciVisible=!!ci;
+
+  // Legenda — přesně ta samá data (barvy/tvary/pořadí), jaká vidí uživatel v appce
+  const legendItems=getVisibleLegendItems([activeDatasetIdx]);
+
+  const W=900,H=600,ml=60,mr=30,mb=60;
+  const legendRows=layoutLegendRows(legendItems, W-40);
+  const legendH=legendRows.length ? 10+legendRows.length*20 : 0;
+  const mt=24+legendH;
+  const pw=W-ml-mr, ph=H-mt-mb;
+
+  const px=v=>ml+(v-xMin)/(xMax-xMin||1)*pw;
+  const py=v=>mt+ph-(v-yMin)/(yMax-yMin||1)*ph;
+
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="'Sora',sans-serif">`;
+  svg+=`<rect width="${W}" height="${H}" fill="#ffffff"/>`;
+  svg+=svgLegendRows(legendRows, W);
+  svg+=svgAxesAndGrid(ml,mt,pw,ph,xMin,xMax,yMin,yMax);
+  svg+=svgAxisTitles(W,H,ml,mt,pw,ph,axisLabels.x,axisLabels.y);
+
+  if(ciVisible){
+    const clip=p=>[Math.max(ml,Math.min(ml+pw,px(p.x))), Math.max(mt,Math.min(mt+ph,py(p.y)))];
+    const uPts=ci.upper.filter(p=>isFinite(p.y)).map(clip);
+    const lPts=ci.lower.filter(p=>isFinite(p.y)).map(clip).reverse();
     if(uPts.length>1){
       const poly=[...uPts,...lPts].map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
       svg+=`<polygon points="${poly}" fill="${col.ciBg}"/>`;
@@ -1983,71 +1876,19 @@ function saveGraphSVG(){
     }
   }
 
-  datasets.forEach((ds,i)=>{
-    if(visibility.length>i && !visibility[i]) return;
-    if(ds.type==='line'){
-      const pts=ds.pts.filter(p=>isFinite(p[1]));
-      if(!pts.length) return;
+  if(fitVisible){
+    const pts=xSmooth.map((xi,i)=>[xi,ySmooth[i]]).filter(p=>isFinite(p[1]));
+    if(pts.length){
       const d=pts.map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
       svg+=`<path d="${d}" fill="none" stroke="${col.fit}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
-    } else if(ds.type==='data'){
-      ds.pts.forEach(([xi,yi])=>{
-        svg+=`<circle cx="${px(xi).toFixed(1)}" cy="${py(yi).toFixed(1)}" r="6" fill="${col.point}" stroke="rgba(0,0,0,0.25)" stroke-width="1.5"/>`;
-      });
-    } else if(ds.type==='excl'){
-      ds.pts.forEach(([xi,yi])=>{
-        svg+=`<circle cx="${px(xi).toFixed(1)}" cy="${py(yi).toFixed(1)}" r="6" fill="none" stroke="${col.excl}" stroke-width="2"/>`;
-      });
     }
-  });
-
-  // Legend — čti přímo z živého grafu pro konzistenci
-  const legendItems=[];
-  if(chartInst){
-    chartInst.data.datasets.forEach((ds,i)=>{
-      if(ds.label==='_ciLower') return; // přeskočit
-      if(!chartInst.isDatasetVisible(i)) return; // přeskočit skryté
-      if(ds.label==='IS 95 %'){
-        legendItems.push({label:'IS 95 %', ci:true});
-      } else if(ds.type==='line'){
-        legendItems.push({label:'fit', color:'#cc3030', line:true});
-      } else if(ds.backgroundColor==='transparent'||ds.backgroundColor==='rgba(255,80,80,.5)'){
-        legendItems.push({label:ds.label, color:'#2264c0', hollow:true});
-      } else {
-        legendItems.push({label:ds.label, color:'#2264c0', hollow:false});
-      }
-    });
   }
 
-  // Vypočítej celkovou šířku legendy a případně rozlož na dva řádky
-  const itemW=item=>item.label.length*6.5+40;
-  const totalW=legendItems.reduce((s,it)=>s+itemW(it),0);
-
-  // Pokud se vše vejde na jeden řádek, klasicky zleva; jinak IS 95 % vpravo
-  const ciItem=legendItems.find(it=>it.ci);
-  const mainItems=legendItems.filter(it=>!it.ci);
-
-  const drawLegendItem=(item,lx,ly)=>{
-    if(item.ci){
-      svg+=`<rect x="${lx}" y="${ly-5}" width="20" height="10" fill="rgba(200,50,50,0.12)" stroke="rgba(200,50,50,0.4)" stroke-width="1" stroke-dasharray="4,2"/>`;
-    } else if(item.line){
-      svg+=`<line x1="${lx}" y1="${ly}" x2="${lx+20}" y2="${ly}" stroke="${item.color}" stroke-width="2.5"/>`;
-    } else if(item.hollow){
-      svg+=`<circle cx="${lx+7}" cy="${ly}" r="5" fill="none" stroke="${item.color}" stroke-width="2"/>`;
-    } else {
-      svg+=`<circle cx="${lx+7}" cy="${ly}" r="5" fill="${item.color}"/>`;
-    }
-    svg+=`<text x="${lx+24}" y="${ly+4}" font-size="11" fill="#444456">${item.label}</text>`;
-  };
-
-  // Hlavní položky zleva
-  let lx=ml+10;
-  mainItems.forEach(item=>{ drawLegendItem(item,lx,mt+10); lx+=itemW(item); });
-
-  // IS 95 % vpravo (pokud existuje)
-  if(ciItem){
-    const ciW=itemW(ciItem);
-    drawLegendItem(ciItem, ml+pw-ciW+4, mt+10);
+  if(dataVisible){
+    x.forEach((xi,i)=>{ svg+=svgShape(ptMeta.key, px(xi), py(y[i]), 6, col.point, 'rgba(0,0,0,0.25)', 1.5); });
+  }
+  if(exclVisible){
+    excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), 6, 'none', col.excl, 2); });
   }
 
   svg+=`</svg>`;
@@ -2055,6 +1896,97 @@ function saveGraphSVG(){
   const a=document.createElement('a');
   a.href='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
   a.download='regrese.svg';
+  a.click();
+}
+
+function saveGraphAllSVG(){
+  const activeDatasetsList=datasets
+    .map((ds,i)=>({ds,i}))
+    .filter(({ds})=>ds.x.length>0||ds.excl.length>0);
+  if(activeDatasetsList.length<2){ alert('Pro export všech dat najednou potřebuješ alespoň 2 sady dat s daty.'); return; }
+  if(!chartInst){ alert('Nejprve zobraz graf.'); return; }
+
+  const dsIdxList=activeDatasetsList.map(({i})=>i);
+  const xMin=chartInst.scales.x.min, xMax=chartInst.scales.x.max;
+  const yMin=chartInst.scales.y.min, yMax=chartInst.scales.y.max;
+
+  const legendItems=getVisibleLegendItems(dsIdxList);
+
+  const W=900,H=600,ml=60,mr=30,mb=60;
+  const legendRows=layoutLegendRows(legendItems, W-40);
+  const legendH=legendRows.length ? 10+legendRows.length*20 : 0;
+  const mt=24+legendH;
+  const pw=W-ml-mr, ph=H-mt-mb;
+
+  const px=v=>ml+(v-xMin)/(xMax-xMin||1)*pw;
+  const py=v=>mt+ph-(v-yMin)/(yMax-yMin||1)*ph;
+
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="'Sora',sans-serif">`;
+  svg+=`<rect width="${W}" height="${H}" fill="#ffffff"/>`;
+  svg+=svgLegendRows(legendRows, W);
+  svg+=svgAxesAndGrid(ml,mt,pw,ph,xMin,xMax,yMin,yMax);
+  const activeLabels=datasets[activeDatasetIdx];
+  svg+=svgAxisTitles(W,H,ml,mt,pw,ph,activeLabels.xLabel,activeLabels.yLabel);
+
+  activeDatasetsList.forEach(({ds,i})=>{
+    const col=DATASET_COLORS[i%DATASET_COLORS.length];
+    const ptMeta=getPointStyleMeta(ds.pointStyle);
+    const {x,y,excl,lastResult:result}=ds;
+
+    const findVis=kind=>{
+      const idx=chartInst.data.datasets.findIndex(d=>d._dsIdx===i && d._kind===kind);
+      return idx<0 ? true : chartInst.isDatasetVisible(idx);
+    };
+    const dataVisible=x.length>0 && findVis('data');
+    const exclVisible=excl.length>0 && findVis('excl');
+    const fitVisible=findVis('fit');
+    const ciItemVisible=findVis('ci');
+
+    let xSmooth=null, ySmooth=null, ci=null;
+    if(result && x.length>0){
+      const xsMin=Math.min(...x), xsMax=Math.max(...x);
+      const step=(xsMax-xsMin)/399||1;
+      xSmooth=Array.from({length:400},(_,k)=>xsMin+k*step);
+      try{ ySmooth=xSmooth.map(result.smooth); }catch(e){ ySmooth=xSmooth.map(()=>NaN); }
+      const dsUseCI=(i===activeDatasetIdx)?showCI:ds.showCI;
+      ci=buildCiBand(result,x,y,xSmooth,ySmooth, dsUseCI && ciItemVisible);
+    }
+
+    if(ci){
+      const clip=p=>[Math.max(ml,Math.min(ml+pw,px(p.x))), Math.max(mt,Math.min(mt+ph,py(p.y)))];
+      const uPts=ci.upper.filter(p=>isFinite(p.y)).map(clip);
+      const lPts=ci.lower.filter(p=>isFinite(p.y)).map(clip).reverse();
+      if(uPts.length>1){
+        const poly=[...uPts,...lPts].map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+        svg+=`<polygon points="${poly}" fill="${col.ciBg}"/>`;
+        const du=uPts.map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+        const dl=lPts.slice().reverse().map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+        svg+=`<path d="${du}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
+        svg+=`<path d="${dl}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
+      }
+    }
+
+    if(fitVisible && xSmooth){
+      const pts=xSmooth.map((xi,k)=>[xi,ySmooth[k]]).filter(p=>isFinite(p[1]));
+      if(pts.length){
+        const d=pts.map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
+        svg+=`<path d="${d}" fill="none" stroke="${col.fit}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+      }
+    }
+
+    if(dataVisible){
+      x.forEach((xi,k)=>{ svg+=svgShape(ptMeta.key, px(xi), py(y[k]), 6, col.point, 'rgba(0,0,0,0.25)', 1.5); });
+    }
+    if(exclVisible){
+      excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), 6, 'none', col.excl, 2); });
+    }
+  });
+
+  svg+=`</svg>`;
+
+  const a=document.createElement('a');
+  a.href='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+  a.download='regrese_vsechna_data.svg';
   a.click();
 }
 
