@@ -14,6 +14,7 @@ let axisLabelsFromFile = false;
 let manualRange = {active:false, xMin:null, xMax:null, yMin:null, yMax:null}; // true pouze pokud byla detekována hlavička ze souboru
 let combineState = {open:false, enabled:false, expanded:false, op:'+', dsA:null, dsB:null};
 let integralState = {enabled:false, expanded:false, fnKey:null, lo:null, hi:null};
+let derivativeState = {enabled:false, expanded:false, fnKey:null, x0:null};
 const REGRESSION_TYPE_SHORT = {
   linear:'Lineární', exponential:'Exponenciální', polynomial:'Polynomická',
   logarithmic:'Logaritmická', gaussian:'Gauss', gaussian2:'2× Gauss',
@@ -438,7 +439,8 @@ function getSessionState(){
     })),
     tools:{
       combine:{enabled:combineState.enabled, op:combineState.op, dsA:combineState.dsA, dsB:combineState.dsB},
-      integral:{enabled:integralState.enabled, fnKey:integralState.fnKey, lo:integralState.lo, hi:integralState.hi}
+      integral:{enabled:integralState.enabled, fnKey:integralState.fnKey, lo:integralState.lo, hi:integralState.hi},
+      derivative:{enabled:derivativeState.enabled, fnKey:derivativeState.fnKey, x0:derivativeState.x0}
     }
   };
 }
@@ -571,6 +573,12 @@ function applySessionState(state){
   integralState.hi = Number.isFinite(it.hi) ? it.hi : null;
   integralState.enabled = !!it.enabled;
   integralState.expanded=false;
+
+  const dv=tools.derivative||{};
+  derivativeState.fnKey = typeof dv.fnKey==='string' ? dv.fnKey : null;
+  derivativeState.x0 = Number.isFinite(dv.x0) ? dv.x0 : null;
+  derivativeState.enabled = !!dv.enabled;
+  derivativeState.expanded=false;
 
   const panel=document.getElementById('combine-panel');
   const btn=document.getElementById('btn-combine');
@@ -1386,6 +1394,7 @@ function toggleCombinePanel(){
 function toggleToolExpand(tool){
   if(tool==='combine') combineState.expanded=!combineState.expanded;
   else if(tool==='integral') integralState.expanded=!integralState.expanded;
+  else if(tool==='derivative') derivativeState.expanded=!derivativeState.expanded;
   updateToolExpandUI();
 }
 
@@ -1399,6 +1408,11 @@ function updateToolExpandUI(){
   const iChevron=document.getElementById('integral-chevron');
   if(iBody) iBody.classList.toggle('expanded', integralState.expanded);
   if(iChevron) iChevron.classList.toggle('expanded', integralState.expanded);
+
+  const dBody=document.getElementById('derivative-tool-body');
+  const dChevron=document.getElementById('derivative-chevron');
+  if(dBody) dBody.classList.toggle('expanded', derivativeState.expanded);
+  if(dChevron) dChevron.classList.toggle('expanded', derivativeState.expanded);
 }
 
 function toggleCombineEnabled(){
@@ -1857,10 +1871,260 @@ function refreshIntegralPanel(){
   }
 }
 
+/* ══════════════════════════════════════════════
+   DERIVACE (tečna)
+══════════════════════════════════════════════ */
+function setDefaultDerivativeX0(entry){
+  derivativeState.x0=(entry.xMin+entry.xMax)/2;
+}
+
+function evalFnSafe(fn, xi){
+  try{ const v=fn(xi); return Number.isFinite(v)?v:NaN; }
+  catch(e){ return NaN; }
+}
+
+function computeDerivativeResult(entry, x0){
+  if(!entry || !Number.isFinite(x0)) return null;
+  let range=entry.xMax-entry.xMin;
+  if(!Number.isFinite(range) || range<=0) range=2;
+  const h=Math.max(range*1e-4, 1e-6);
+
+  const y0=evalFnSafe(entry.fn, x0);
+  const slope=(evalFnSafe(entry.fn, x0+h)-evalFnSafe(entry.fn, x0-h))/(2*h);
+  if(!Number.isFinite(y0) || !Number.isFinite(slope)) return null;
+
+  let slopeHalfWidth=null;
+  if(entry.ciInfo){
+    try{
+      const xs=[x0-h, x0+h];
+      const ys=xs.map(xi=>evalFnSafe(entry.fn,xi));
+      const band=buildCiBand(entry.ciInfo.result, entry.ciInfo.x, entry.ciInfo.y, xs, ys, true);
+      if(band){
+        const slopeUpper=(band.upper[1].y-band.upper[0].y)/(2*h);
+        const slopeLower=(band.lower[1].y-band.lower[0].y)/(2*h);
+        if(Number.isFinite(slopeUpper) && Number.isFinite(slopeLower)){
+          slopeHalfWidth=Math.abs(slopeUpper-slopeLower)/2;
+        }
+      }
+    }catch(e){ slopeHalfWidth=null; }
+  }
+  return {x0, y0, slope, slopeHalfWidth};
+}
+
+function computeDatasetsBounds(combinedDatasets){
+  let xMin=Infinity, xMax=-Infinity, yMin=Infinity, yMax=-Infinity;
+  combinedDatasets.forEach(ds=>{
+    if(!ds.data) return;
+    ds.data.forEach(p=>{
+      if(p && Number.isFinite(p.x)){ if(p.x<xMin) xMin=p.x; if(p.x>xMax) xMax=p.x; }
+      if(p && Number.isFinite(p.y)){ if(p.y<yMin) yMin=p.y; if(p.y>yMax) yMax=p.y; }
+    });
+  });
+  if(!Number.isFinite(xMin)||!Number.isFinite(xMax)||!Number.isFinite(yMin)||!Number.isFinite(yMax)) return null;
+  return {xMin, xMax, yMin, yMax};
+}
+
+function computeDerivativeTangentSeries(entry, x0, dataBounds){
+  const res=computeDerivativeResult(entry, x0);
+  if(!res) return null;
+
+  // Tečna se kreslí přes celou aktuální oblast grafu (ne jen přes doménu
+  // vybrané funkce) — rozsahy os se podle ní ale nikdy nepřepočítávají,
+  // protože osa y je při zapnuté derivaci explicitně zamčená (viz renderCombinedChart).
+  let a=entry.xMin, b=entry.xMax;
+  if(dataBounds && Number.isFinite(dataBounds.xMin) && Number.isFinite(dataBounds.xMax) && dataBounds.xMin<dataBounds.xMax){
+    a=dataBounds.xMin; b=dataBounds.xMax;
+  }
+  if(!Number.isFinite(a) || !Number.isFinite(b) || a===b) return null;
+
+  const y1=res.slope*(a-res.x0)+res.y0;
+  const y2=res.slope*(b-res.x0)+res.y0;
+  if(!Number.isFinite(y1) || !Number.isFinite(y2)) return null;
+  return {
+    line:{
+      type:'line', label:'Tečna',
+      data:[{x:a,y:y1},{x:b,y:y2}],
+      borderColor:'#1a8840', borderWidth:2, borderDash:[3,3],
+      pointRadius:0, fill:false, tension:0, order:5,
+      _kind:'derivative-line'
+    },
+    point:{
+      type:'scatter', label:'Bod dotyku',
+      data:[{x:res.x0,y:res.y0}],
+      backgroundColor:'#1a8840', borderColor:'#fff', borderWidth:2,
+      pointRadius:6, pointStyle:'circle', order:4,
+      _kind:'derivative-point'
+    }
+  };
+}
+
+function toggleDerivativeEnabled(){
+  if(!derivativeState.enabled){
+    const list=getIntegrableFunctions();
+    if(!list.length) return;
+    if(!derivativeState.fnKey || !list.some(e=>e.key===derivativeState.fnKey)){
+      derivativeState.fnKey=list[0].key;
+      setDefaultDerivativeX0(list[0]);
+    }
+  }
+  derivativeState.enabled=!derivativeState.enabled;
+  renderCombinedChart();
+}
+
+function updateDerivativeSwitchUI(){
+  const track=document.getElementById('derivative-enable-track');
+  const knob=document.getElementById('derivative-enable-knob');
+  if(track){
+    track.style.background=derivativeState.enabled?'var(--accent)':'var(--btn)';
+    track.style.borderColor=derivativeState.enabled?'var(--accent)':'var(--border)';
+  }
+  if(knob) knob.style.left=derivativeState.enabled?'18px':'1px';
+}
+
+function updateDerivativeResultText(entry){
+  const resultEl=document.getElementById('derivative-result');
+  if(!resultEl) return;
+  if(!derivativeState.enabled || !entry){ resultEl.style.display='none'; return; }
+
+  const res=computeDerivativeResult(entry, derivativeState.x0);
+  if(!res){ resultEl.style.display='none'; return; }
+
+  resultEl.style.display='block';
+  const intercept=res.y0-res.slope*res.x0;
+  const sign=intercept>=0?'+':'−';
+  let html=`Bod dotyku: (${f6(res.x0)}; ${f6(res.y0)})<br>`+
+           `<b>f'(x₀) ≈ ${f6(res.slope)}</b>`;
+  if(res.slopeHalfWidth!==null){
+    html+=` <span style="color:var(--text-muted);">(95% IS: ${f6(res.slope-res.slopeHalfWidth)} – ${f6(res.slope+res.slopeHalfWidth)})</span>`;
+  } else {
+    html+=` <span style="color:var(--text-muted);">(nejistotu nelze u kombinace spočítat)</span>`;
+  }
+  html+=`<br>Tečna: y = ${f6(res.slope)}x ${sign} ${f6(Math.abs(intercept))}`;
+  resultEl.innerHTML=html;
+}
+
+function syncDerivativeX0Controls(){
+  const sliderEl=document.getElementById('derivative-x0-slider');
+  const inputEl=document.getElementById('derivative-x0-input');
+  const fmt=v=>Number.isFinite(v)?parseFloat(v.toPrecision(6)):'';
+  if(sliderEl && document.activeElement!==sliderEl) sliderEl.value=derivativeState.x0;
+  if(inputEl && document.activeElement!==inputEl) inputEl.value=fmt(derivativeState.x0);
+}
+
+// Rychlá cesta pro tažení posuvníku / psaní do políčka x0 — jen posune
+// datasety tečny a bodu v už existujícím grafu (chart.update('none')),
+// BEZ zbourání a nového napočítání celého grafu (fity, tabulky, panely...).
+function updateDerivativeLive(){
+  if(!chartInst || !derivativeState.enabled){ renderCombinedChart(); return; }
+
+  const entry=getIntegrableFunctions().find(e=>e.key===derivativeState.fnKey);
+  if(!entry){ renderCombinedChart(); return; }
+
+  const lineDs=chartInst.data.datasets.find(d=>d._kind==='derivative-line');
+  const pointDs=chartInst.data.datasets.find(d=>d._kind==='derivative-point');
+  if(!lineDs || !pointDs){ renderCombinedChart(); return; }
+
+  const xMinAxis=chartInst.scales?.x?.min, xMaxAxis=chartInst.scales?.x?.max;
+  const dataBounds=(Number.isFinite(xMinAxis) && Number.isFinite(xMaxAxis) && xMinAxis<xMaxAxis)
+    ? {xMin:xMinAxis, xMax:xMaxAxis} : null;
+
+  const tangent=computeDerivativeTangentSeries(entry, derivativeState.x0, dataBounds);
+  if(!tangent){ renderCombinedChart(); return; }
+
+  lineDs.data=tangent.line.data;
+  pointDs.data=tangent.point.data;
+  chartInst.update('none');
+
+  syncDerivativeX0Controls();
+  updateDerivativeResultText(entry);
+}
+
+function onDerivativeFnChange(){
+  const sel=document.getElementById('derivative-fn');
+  if(!sel) return;
+  derivativeState.fnKey=sel.value;
+  const entry=getIntegrableFunctions().find(e=>e.key===derivativeState.fnKey);
+  if(entry) setDefaultDerivativeX0(entry);
+  renderCombinedChart();
+}
+
+function onDerivativeSliderInput(){
+  const slider=document.getElementById('derivative-x0-slider');
+  if(!slider) return;
+  const v=parseFloat(slider.value);
+  if(!isNaN(v)) derivativeState.x0=v;
+  updateDerivativeLive();
+}
+
+function onDerivativeInputChange(){
+  const inputEl=document.getElementById('derivative-x0-input');
+  if(!inputEl) return;
+  let v=parseFloat(inputEl.value.replace(',','.'));
+  if(isNaN(v)) return;
+  const entry=getIntegrableFunctions().find(e=>e.key===derivativeState.fnKey);
+  if(entry && Number.isFinite(entry.xMin) && Number.isFinite(entry.xMax)){
+    v=Math.min(Math.max(v, entry.xMin), entry.xMax);
+  }
+  derivativeState.x0=v;
+  updateDerivativeLive();
+}
+
+function refreshDerivativePanel(){
+  updateDerivativeSwitchUI();
+  if(!combineState.open) return;
+
+  const msgEl=document.getElementById('derivative-msg');
+  const fnRow=document.getElementById('derivative-fn-row');
+  const x0Row=document.getElementById('derivative-x0-row');
+  const resultEl=document.getElementById('derivative-result');
+  const selEl=document.getElementById('derivative-fn');
+  const sliderEl=document.getElementById('derivative-x0-slider');
+
+  const list=getIntegrableFunctions();
+
+  if(!list.length){
+    if(fnRow) fnRow.style.display='none';
+    if(x0Row) x0Row.style.display='none';
+    if(resultEl) resultEl.style.display='none';
+    if(msgEl) msgEl.style.display='block';
+    derivativeState.fnKey=null; derivativeState.enabled=false;
+    updateDerivativeSwitchUI();
+    return;
+  }
+
+  if(msgEl) msgEl.style.display='none';
+  if(fnRow) fnRow.style.display='';
+  if(x0Row) x0Row.style.display='';
+
+  if(!list.some(e=>e.key===derivativeState.fnKey)){
+    derivativeState.fnKey=list[0].key;
+    setDefaultDerivativeX0(list[0]);
+  }
+
+  if(selEl){
+    selEl.innerHTML=list.map(e=>
+      `<option value="${escapeHtmlAttr(e.key)}"${e.key===derivativeState.fnKey?' selected':''}>${escapeHtmlAttr(e.label)}</option>`).join('');
+  }
+
+  const entry=list.find(e=>e.key===derivativeState.fnKey);
+  if(entry){
+    if(derivativeState.x0===null || !Number.isFinite(derivativeState.x0)) setDefaultDerivativeX0(entry);
+    if(sliderEl){
+      sliderEl.min=entry.xMin; sliderEl.max=entry.xMax;
+      const range=entry.xMax-entry.xMin;
+      sliderEl.step = (Number.isFinite(range) && range>0) ? (range/1000) : 0.01;
+    }
+    syncDerivativeX0Controls();
+  }
+
+  updateDerivativeResultText(entry);
+}
+
 function renderCombinedChart(){
   renderTabsUI();
   refreshCombinePanelOptions();
   refreshIntegralPanel();
+  refreshDerivativePanel();
   if(chartInst){chartInst.destroy();chartInst=null;}
 
   const activeDatasets=datasets
@@ -1955,6 +2219,21 @@ function renderCombinedChart(){
     }
   }
 
+  let derivativeAxisLock=null;
+  if(derivativeState.enabled){
+    const entry=getIntegrableFunctions().find(e=>e.key===derivativeState.fnKey);
+    if(entry){
+      const dataBounds=computeDatasetsBounds(combinedDatasets);
+      if(dataBounds && !manualRange.active){
+        const span=(dataBounds.yMax-dataBounds.yMin)||1;
+        const pad=span*0.08;
+        derivativeAxisLock={min:dataBounds.yMin-pad, max:dataBounds.yMax+pad};
+      }
+      const tangent=computeDerivativeTangentSeries(entry, derivativeState.x0, dataBounds);
+      if(tangent){ combinedDatasets.push(tangent.line); combinedDatasets.push(tangent.point); }
+    }
+  }
+
   const c=chartColors();
   const activeLabels=datasets[activeDatasetIdx];
   const ctx=document.getElementById('myChart').getContext('2d');
@@ -1970,7 +2249,7 @@ function renderCombinedChart(){
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
            title:{display:true,text:activeLabels.xLabel,color:c.tick,font:{family:'Sora',size:12}}},
-        y:{type:'linear',
+        y:{type:'linear',...(derivativeAxisLock||{}),
            grid:{color:c.grid},
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
@@ -2346,7 +2625,7 @@ function getVisibleLegendItems(dsIdxList){
   if(typeof labelOpts.filter==='function'){
     items=items.filter(it=>labelOpts.filter(it, chartInst.data));
   }
-  const TOOL_KINDS=['combine','integral-area'];
+  const TOOL_KINDS=['combine','integral-area','derivative-line','derivative-point'];
   return items.filter(it=>{
     const dsCfg=chartInst.data.datasets[it.datasetIndex];
     if(!dsCfg) return false;
@@ -2416,6 +2695,20 @@ function svgIntegralArea(px, py, ml, mt, pw, ph){
   const dTop=topPts.map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
   return `<polygon points="${poly}" fill="rgba(200,48,48,0.18)"/>`+
          `<path d="${dTop}" fill="none" stroke="rgba(200,48,48,0.55)" stroke-width="1.5"/>`;
+}
+
+function svgDerivativeTangent(px, py){
+  if(!derivativeState.enabled) return '';
+  const entry=getIntegrableFunctions().find(e=>e.key===derivativeState.fnKey);
+  if(!entry) return '';
+  const series=computeDerivativeTangentSeries(entry, derivativeState.x0);
+  if(!series) return '';
+  const p1=series.line.data[0], p2=series.line.data[1];
+  if(!Number.isFinite(p1.y) || !Number.isFinite(p2.y)) return '';
+  let svg=`<path d="M${px(p1.x).toFixed(1)},${py(p1.y).toFixed(1)} L${px(p2.x).toFixed(1)},${py(p2.y).toFixed(1)}" fill="none" stroke="#1a8840" stroke-width="2" stroke-dasharray="3,3"/>`;
+  const pt=series.point.data[0];
+  svg+=svgShape('circle', px(pt.x), py(pt.y), 6, '#1a8840', '#fff', 2);
+  return svg;
 }
 
 function saveGraphSVG(){
@@ -2498,6 +2791,7 @@ function saveGraphSVG(){
   }
 
   svg+=svgCombinedCurve(px,py);
+  svg+=svgDerivativeTangent(px,py);
 
   svg+=`</svg>`;
 
@@ -2592,6 +2886,7 @@ function saveGraphAllSVG(){
   });
 
   svg+=svgCombinedCurve(px,py);
+  svg+=svgDerivativeTangent(px,py);
 
   svg+=`</svg>`;
 
