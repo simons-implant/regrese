@@ -742,7 +742,7 @@ function renderCustomEquationDropdownItems(){
   container.innerHTML=customEquationLibrary.map(eq=>`
     <div class="rtype-option custom-saved" data-eq-id="${eq.id}" onclick="selectCustomEquationById('${eq.id}',this)">
       <span class="eq-name">${escapeHtmlAttr(eq.name)}</span>
-      <button class="eq-remove" onclick="event.stopPropagation(); removeCustomEquation('${eq.id}')" title="Odebrat rovnici">🗑️</button>
+      <button class="eq-remove" onclick="event.stopPropagation(); removeCustomEquation('${eq.id}')" title="Odebrat rovnici"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
     </div>
   `).join('');
 }
@@ -1093,6 +1093,22 @@ function showPointsOnly(){
 
 
 
+function pulseRegressionButton(){
+  const btn=document.getElementById('btn-regrese');
+  if(!btn) return;
+  btn.classList.remove('btn-pulse');
+  void btn.offsetWidth; // vynutí reflow, aby se animace spustila znovu i při rychlém opakovaném kliknutí
+  btn.classList.add('btn-pulse');
+}
+
+function flashResultsPanel(){
+  const pmEl=document.getElementById('resParams');
+  if(!pmEl) return;
+  pmEl.classList.remove('res-flash');
+  void pmEl.offsetWidth;
+  pmEl.classList.add('res-flash');
+}
+
 function computeRegression(){
   const {x,y,excl}=getTableData();
   const eqEl=document.getElementById('resEq');
@@ -1107,6 +1123,8 @@ function computeRegression(){
     renderCombinedChart();
     return;
   }
+
+  pulseRegressionButton();
 
   const type=document.getElementById('rType').value;
   let result;
@@ -1129,6 +1147,7 @@ function computeRegression(){
   }
 
   displayResults(result, x.length, x.length+excl.length);
+  flashResultsPanel();
   ds.lastResult=result;
   lastResult=result; lastData={x,y,excl};
   const _br2=document.getElementById('btn-regrese'); if(_br2){_br2.style.color='var(--accent)';_br2.style.opacity='1';_br2.title='Skrýt regresi';}
@@ -1257,6 +1276,11 @@ function chartColors(){
     : {bg:'#fafafa', grid:'rgba(0,0,0,.07)',     tick:'#444456',axis:'#ccccd8'};
 }
 
+function setChartEmptyState(show){
+  const el=document.getElementById('chart-empty-state');
+  if(el) el.style.display = show ? 'flex' : 'none';
+}
+
 function clearChart(){
   if(chartInst){chartInst.destroy();chartInst=null;}
   const c=chartColors();
@@ -1264,6 +1288,7 @@ function clearChart(){
   const ctx=canvas.getContext('2d');
   ctx.fillStyle=c.bg;
   ctx.fillRect(0,0,canvas.width,canvas.height);
+  setChartEmptyState(true);
 }
 
 function buildCiBand(result, x, y, xSmooth, ySmooth, useCI){
@@ -1310,6 +1335,7 @@ function renderCombinedChart(){
     .filter(({ds})=>ds.x.length>0||ds.excl.length>0);
 
   if(!activeDatasets.length){ clearChart(); return; }
+  setChartEmptyState(false);
 
   const multi=activeDatasets.length>1;
   const combinedDatasets=[];
