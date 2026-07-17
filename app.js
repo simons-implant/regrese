@@ -12,6 +12,13 @@ let showCI = false;
 let axisLabels = {x:'x', y:'y'};
 let axisLabelsFromFile = false;
 let manualRange = {active:false, xMin:null, xMax:null, yMin:null, yMax:null}; // true pouze pokud byla detekována hlavička ze souboru
+let combineState = {open:false, enabled:false, op:'+', dsA:null, dsB:null};
+let integralState = {enabled:false, fnKey:null, lo:null, hi:null};
+const REGRESSION_TYPE_SHORT = {
+  linear:'Lineární', exponential:'Exponenciální', polynomial:'Polynomická',
+  logarithmic:'Logaritmická', gaussian:'Gauss', gaussian2:'2× Gauss',
+  gaussian3:'3× Gauss', rational:'Lomenná', fourier:'Fourier', custom:'Vlastní rovnice'
+};
 
 /* ══════════════════════════════════════════════
    VÍCE SAD DAT (max 5 záložek)
@@ -1326,8 +1333,490 @@ function buildCiBand(result, x, y, xSmooth, ySmooth, useCI){
   };
 }
 
+/* ══════════════════════════════════════════════
+   KOMBINACE DVOU REGRESÍ (+, −, ×)
+══════════════════════════════════════════════ */
+function getCombinableDatasets(){
+  return datasets
+    .map((ds,i)=>({ds,i}))
+    .filter(({ds})=> ds.x.length>0 && ds.lastResult && typeof ds.lastResult.smooth==='function');
+}
+
+function combineOptionLabel(ds){
+  const t=ds.lastResult && ds.lastResult.type;
+  const short=REGRESSION_TYPE_SHORT[t] || t || '';
+  return `${ds.name} — ${short}`;
+}
+
+function toggleCombinePanel(){
+  combineState.open=!combineState.open;
+  const panel=document.getElementById('combine-panel');
+  const btn=document.getElementById('btn-combine');
+  if(panel) panel.classList.toggle('open', combineState.open);
+  if(btn) btn.classList.toggle('active', combineState.open);
+  renderCombinedChart();
+}
+
+function toggleCombineEnabled(){
+  if(!combineState.enabled && (combineState.dsA===null || combineState.dsB===null)) return;
+  combineState.enabled=!combineState.enabled;
+  renderCombinedChart();
+}
+
+function updateCombineSwitchUI(){
+  const track=document.getElementById('combine-enable-track');
+  const knob=document.getElementById('combine-enable-knob');
+  if(track){
+    track.style.background=combineState.enabled?'var(--accent)':'var(--btn)';
+    track.style.borderColor=combineState.enabled?'var(--accent)':'var(--border)';
+  }
+  if(knob) knob.style.left=combineState.enabled?'18px':'1px';
+}
+
+function setCombineOp(op){
+  combineState.op=op;
+  renderCombinedChart();
+}
+
+function onCombineSelectChange(){
+  const selA=document.getElementById('combine-ds-a');
+  const selB=document.getElementById('combine-ds-b');
+  if(!selA||!selB) return;
+  combineState.dsA = selA.value===''? null : parseInt(selA.value,10);
+  combineState.dsB = selB.value===''? null : parseInt(selB.value,10);
+  if(combineState.dsA===null || combineState.dsB===null || combineState.dsA===combineState.dsB){
+    combineState.enabled=false;
+  }
+  renderCombinedChart();
+}
+
+function updateCombineOpButtons(){
+  document.querySelectorAll('.combine-op-btn').forEach(b=>{
+    b.classList.toggle('active', b.dataset.op===combineState.op);
+  });
+}
+
+function combineFnParamsHtml(ds){
+  const r=ds.lastResult;
+  const short=REGRESSION_TYPE_SHORT[r.type]||r.type||'';
+  let rows='';
+  if(r.type==='gaussian'){
+    rows+=`• A = (${f6(r.a)} ± ${f6(r.seA)})<br>`
+        +`• μ = (${f6(r.b)} ± ${f6(r.seB)})<br>`
+        +`• σ = (${f6(r.c)} ± ${f6(r.seC)})<br>`
+        +`• FWHM = (${f6(r.FWHM)} ± ${f6(r.seFWHM)})<br>`
+        +`• c = (${f6(r.d)} ± ${f6(r.seD)})<br>`;
+  } else if(r.type==='gaussian2'||r.type==='gaussian3'){
+    for(let k=0;k<r.nPeaks;k++){
+      const A=r.params[k*3], mu=r.params[k*3+1], sig=r.params[k*3+2];
+      const seA=r.se[k*3], seMu=r.se[k*3+1], seSig=r.se[k*3+2];
+      rows+=`<b>Peak ${k+1}:</b><br>`
+          +`• A${k+1} = (${f6(A)} ± ${f6(seA)})<br>`
+          +`• μ${k+1} = (${f6(mu)} ± ${f6(seMu)})<br>`
+          +`• σ${k+1} = (${f6(sig)} ± ${f6(seSig)})<br>`
+          +`• FWHM${k+1} = (${f6(r.FWHMs[k].FWHM)} ± ${f6(r.FWHMs[k].seFWHM)})<br>`;
+    }
+    rows+=`• c = (${f6(r.params[r.params.length-1])} ± ${f6(r.se[r.se.length-1])})<br>`;
+  } else if(r.type==='fourier'){
+    const hrStyle="border:none;border-top:1px solid var(--border);margin:5px 0;";
+    rows+=`• a₀ = (${f6(r.params[0])} ± ${f6(r.se[0])})<br>`;
+    rows+=`<hr style="${hrStyle}">`;
+    for(let k=1;k<=r.nH;k++){
+      const h=r.harmonics[k-1];
+      rows+=`• a${k} = (${f6(h.ak)} ± ${f6(h.seAk)})<br>`
+          +`• b${k} = (${f6(h.bk)} ± ${f6(h.seBk)})<br>`
+          +`• R${k} = (${f6(h.Rk)} ± ${f6(h.seRk)})<br>`
+          +`• φ${k} = (${f6(h.phik)} ± ${f6(h.sePhik)}) rad<br>`;
+      rows+=`<hr style="${hrStyle}">`;
+    }
+    if(r.periodFixed){
+      rows+=`• ω = ${f6(r.omega)} rad (pevné)<br>`
+          +`• Perioda T = ${f6(r.period)} (zadáno ručně)<br>`;
+    } else {
+      rows+=`• ω = (${f6(r.omega)} ± ${f6(r.seOmega)}) rad<br>`
+          +`• Perioda T = (${f6(r.period)} ± ${f6(r.sePeriod)})<br>`;
+    }
+  } else if(r.type==='custom'){
+    r.paramNames.forEach((name,i)=>{
+      rows+=`• ${name} = (${f6(r.params[i])} ± ${f6(r.se[i])})<br>`;
+    });
+  } else {
+    rows+=`• a = (${f6(r.a)} ± ${f6(r.seA)})<br>`
+        +`• b = (${f6(r.b)} ± ${f6(r.seB)})<br>`;
+    if(r.type==='polynomial') rows+=`• c = (${f6(r.c)} ± ${f6(r.seC)})<br>`;
+    if(r.type==='rational') rows+=`• c = (${f6(r.c)} ± ${f6(r.seC)})<br>`;
+  }
+  rows+=`• R² = <span class="r2">${r.r2.toFixed(6)}</span><br>`;
+  return `<div class="combine-fn-block"><b>${escapeHtmlAttr(ds.name)}</b> <span class="combine-fn-type">(${escapeHtmlAttr(short)})</span><br>${rows}</div>`;
+}
+
+function combinedResultToTex(resultA, resultB, op){
+  const texA=resultToTex(resultA).replace(/^y\s*=\s*/,'');
+  const texB=resultToTex(resultB).replace(/^y\s*=\s*/,'');
+  const opTex = op==='+' ? '+' : op==='-' ? '-' : '\\cdot';
+  return `y = \\left(${texA}\\right) ${opTex} \\left(${texB}\\right)`;
+}
+
+function combineGeneralTexPart(ds){
+  const type=ds.regressionType;
+  const r=ds.lastResult;
+  if(type==='fourier'){
+    const nH=(r && r.nH) || ds.fourierHarmonics || 3;
+    return `a_0 + \\sum_{k=1}^{${nH}}\\left[a_k\\cos(k\\omega x) + b_k\\sin(k\\omega x)\\right]`;
+  }
+  if(type==='custom'){
+    if(ds.customFormula){
+      try{ return math.parse(ds.customFormula).toTex(); }
+      catch(e){ return ds.customFormula; }
+    }
+    return '?';
+  }
+  return (GENERAL_TEX[type]||'').replace(/^y\s*=\s*/,'');
+}
+
+function combinedGeneralTex(dsA, dsB, op){
+  const texA=combineGeneralTexPart(dsA);
+  const texB=combineGeneralTexPart(dsB);
+  const opTex = op==='+' ? '+' : op==='-' ? '-' : '\\cdot';
+  return `y = \\left(${texA}\\right) ${opTex} \\left(${texB}\\right)`;
+}
+
+function updateCombineDisplay(){
+  const paramsEl=document.getElementById('combine-result-eq');
+  const eqLine=document.getElementById('combine-eq-line');
+  const eqGeneralEl=document.getElementById('combine-eq-general');
+  const eqTexEl=document.getElementById('combine-eq-tex');
+  const a=datasets[combineState.dsA], b=datasets[combineState.dsB];
+  const hasSelection = a && b && a.lastResult && b.lastResult;
+  const paramsVisible = combineState.enabled && hasSelection;
+  const eqVisible = combineState.enabled && hasSelection;
+
+  if(paramsEl) paramsEl.innerHTML = paramsVisible ? (combineFnParamsHtml(a)+combineFnParamsHtml(b)) : '';
+
+  if(eqLine) eqLine.style.display = eqVisible ? 'block' : 'none';
+  if(eqVisible){
+    if(eqGeneralEl){
+      try{ katex.render(combinedGeneralTex(a,b,combineState.op), eqGeneralEl, {throwOnError:false, displayMode:false}); }
+      catch(e){ eqGeneralEl.textContent=''; }
+    }
+    if(eqTexEl){
+      try{ katex.render(combinedResultToTex(a.lastResult,b.lastResult,combineState.op), eqTexEl, {throwOnError:false, displayMode:false}); }
+      catch(e){
+        const opSym = combineState.op==='+' ? '+' : combineState.op==='-' ? '−' : '×';
+        eqTexEl.textContent = `${a.name}(x) ${opSym} ${b.name}(x)`;
+      }
+    }
+  } else {
+    if(eqGeneralEl) eqGeneralEl.textContent='';
+    if(eqTexEl) eqTexEl.textContent='';
+  }
+
+  updateCombineSwitchUI();
+}
+
+function refreshCombinePanelOptions(){
+  if(!combineState.open){ updateCombineDisplay(); return; }
+  const selA=document.getElementById('combine-ds-a');
+  const selB=document.getElementById('combine-ds-b');
+  const msgEl=document.getElementById('combine-msg');
+  const opRow=document.getElementById('combine-op-row');
+  if(!selA||!selB) return;
+
+  const list=getCombinableDatasets();
+
+  if(list.length<2){
+    selA.style.display='none'; selB.style.display='none';
+    selA.previousElementSibling && (selA.previousElementSibling.style.display='none');
+    selB.previousElementSibling && (selB.previousElementSibling.style.display='none');
+    if(opRow) opRow.style.display='none';
+    if(msgEl) msgEl.style.display='block';
+    combineState.dsA=null; combineState.dsB=null; combineState.enabled=false;
+    updateCombineDisplay();
+    return;
+  }
+
+  if(msgEl) msgEl.style.display='none';
+  selA.style.display=''; selB.style.display='';
+  selA.previousElementSibling && (selA.previousElementSibling.style.display='');
+  selB.previousElementSibling && (selB.previousElementSibling.style.display='');
+  if(opRow) opRow.style.display='';
+
+  const validIdx=list.map(o=>o.i);
+  if(list.length===2){
+    combineState.dsA=list[0].i; combineState.dsB=list[1].i;
+  } else {
+    if(!validIdx.includes(combineState.dsA)) combineState.dsA=list[0].i;
+    if(!validIdx.includes(combineState.dsB) || combineState.dsB===combineState.dsA){
+      const alt=list.find(o=>o.i!==combineState.dsA);
+      combineState.dsB = alt ? alt.i : null;
+    }
+  }
+  if(combineState.dsA===null || combineState.dsB===null) combineState.enabled=false;
+
+  selA.innerHTML=list.map(({ds,i})=>
+    `<option value="${i}"${i===combineState.dsA?' selected':''}>${escapeHtmlAttr(combineOptionLabel(ds))}</option>`).join('');
+  selB.innerHTML=list.map(({ds,i})=>
+    `<option value="${i}"${i===combineState.dsB?' selected':''}>${escapeHtmlAttr(combineOptionLabel(ds))}</option>`).join('');
+
+  updateCombineOpButtons();
+  updateCombineDisplay();
+}
+
+function computeCombinedSeries(){
+  const a=datasets[combineState.dsA], b=datasets[combineState.dsB];
+  if(!a || !b || combineState.dsA===combineState.dsB) return null;
+  if(!a.lastResult || !b.lastResult) return null;
+  if(typeof a.lastResult.smooth!=='function' || typeof b.lastResult.smooth!=='function') return null;
+
+  const allX=[...a.x, ...b.x];
+  if(!allX.length) return null;
+  const xMin=Math.min(...allX), xMax=Math.max(...allX);
+  const step=(xMax-xMin)/399 || 1;
+  const xs=Array.from({length:400},(_,k)=>xMin+k*step);
+
+  const op=combineState.op;
+  const combine=(va,vb)=> op==='+' ? va+vb : op==='-' ? va-vb : va*vb;
+
+  const ys=xs.map(xi=>{
+    try{
+      const va=a.lastResult.smooth(xi), vb=b.lastResult.smooth(xi);
+      const v=combine(va,vb);
+      return Number.isFinite(v) ? v : NaN;
+    }catch(e){ return NaN; }
+  });
+
+  const opSym = op==='+' ? '+' : op==='-' ? '−' : '×';
+  return {
+    type:'line', label:`${a.name} ${opSym} ${b.name}`,
+    data:xs.map((xi,k)=>({x:xi,y:ys[k]})),
+    borderColor:'#c83030', borderWidth:2.5, borderDash:[7,4],
+    pointRadius:0, fill:false, tension:0, order:1, spanGaps:false,
+    _kind:'combine'
+  };
+}
+
+/* ══════════════════════════════════════════════
+   INTEGRÁL
+══════════════════════════════════════════════ */
+function getIntegrableFunctions(){
+  const list=getCombinableDatasets().map(({ds,i})=>({
+    key:`ds:${i}`,
+    label:combineOptionLabel(ds),
+    xMin:Math.min(...ds.x), xMax:Math.max(...ds.x),
+    fn:ds.lastResult.smooth,
+    ciInfo:{result:ds.lastResult, x:ds.x, y:ds.y}
+  }));
+  if(combineState.enabled && combineState.dsA!==null && combineState.dsB!==null){
+    const a=datasets[combineState.dsA], b=datasets[combineState.dsB];
+    if(a && b && a.lastResult && b.lastResult){
+      const allX=[...a.x, ...b.x];
+      if(allX.length){
+        const xMin=Math.min(...allX), xMax=Math.max(...allX);
+        const op=combineState.op;
+        const combine=(va,vb)=> op==='+' ? va+vb : op==='-' ? va-vb : va*vb;
+        const opSym = op==='+' ? '+' : op==='-' ? '−' : '×';
+        list.push({
+          key:'combine',
+          label:`${a.name} ${opSym} ${b.name} (kombinace)`,
+          xMin, xMax,
+          fn:xi=>combine(a.lastResult.smooth(xi), b.lastResult.smooth(xi)),
+          ciInfo:null
+        });
+      }
+    }
+  }
+  return list;
+}
+
+function setDefaultIntegralBounds(entry){
+  let range=entry.xMax-entry.xMin;
+  if(!Number.isFinite(range) || range<=0) range=2;
+  integralState.lo = entry.xMin + range/3;
+  integralState.hi = entry.xMin + range*2/3;
+}
+
+function simpsonIntegrateArray(xs, ys){
+  const n=xs.length-1;
+  if(n<1) return 0;
+  const h=(xs[n]-xs[0])/n;
+  if(n%2===0){
+    let sum=ys[0]+ys[n];
+    for(let i=1;i<n;i++) sum += (i%2===0?2:4)*ys[i];
+    return sum*h/3;
+  }
+  let sum=0;
+  for(let i=0;i<n;i++) sum += (ys[i]+ys[i+1])/2*h;
+  return sum;
+}
+
+function computeIntegralResult(entry, lo, hi){
+  if(!entry || !Number.isFinite(lo) || !Number.isFinite(hi) || lo===hi) return null;
+  const sign = lo<=hi ? 1 : -1;
+  const a=Math.min(lo,hi), b=Math.max(lo,hi);
+
+  const n=400;
+  const xs=Array.from({length:n+1},(_,k)=>a+k*(b-a)/n);
+  const ys=xs.map(xi=>{
+    try{ const v=entry.fn(xi); return Number.isFinite(v)?v:0; }
+    catch(e){ return 0; }
+  });
+  const value = sign*simpsonIntegrateArray(xs, ys);
+
+  let ciHalfWidth=null;
+  if(entry.ciInfo){
+    try{
+      const band=buildCiBand(entry.ciInfo.result, entry.ciInfo.x, entry.ciInfo.y, xs, ys, true);
+      if(band){
+        const upperInt=sign*simpsonIntegrateArray(xs, band.upper.map(p=>p.y));
+        const lowerInt=sign*simpsonIntegrateArray(xs, band.lower.map(p=>p.y));
+        ciHalfWidth=Math.abs(upperInt-lowerInt)/2;
+      }
+    }catch(e){ ciHalfWidth=null; }
+  }
+  return {value, ciHalfWidth, lo:a, hi:b};
+}
+
+function computeIntegralAreaSeries(entry, lo, hi){
+  if(!entry || !Number.isFinite(lo) || !Number.isFinite(hi) || lo===hi) return null;
+  const a=Math.min(lo,hi), b=Math.max(lo,hi);
+  const n=200;
+  const pts=[];
+  for(let k=0;k<=n;k++){
+    const xi=a+k*(b-a)/n;
+    let yi;
+    try{ yi=entry.fn(xi); }catch(e){ yi=NaN; }
+    pts.push({x:xi, y:Number.isFinite(yi)?yi:0});
+  }
+  return {
+    type:'line', label:'Plocha integrálu',
+    data:pts,
+    borderColor:'rgba(200,48,48,0.55)', borderWidth:1.5,
+    backgroundColor:'rgba(200,48,48,0.18)',
+    pointRadius:0, fill:'origin', tension:0, order:6,
+    _kind:'integral-area'
+  };
+}
+
+function toggleIntegralEnabled(){
+  if(!integralState.enabled){
+    const list=getIntegrableFunctions();
+    if(!list.length) return;
+    if(!integralState.fnKey || !list.some(e=>e.key===integralState.fnKey)){
+      integralState.fnKey=list[0].key;
+      setDefaultIntegralBounds(list[0]);
+    }
+  }
+  integralState.enabled=!integralState.enabled;
+  renderCombinedChart();
+}
+
+function updateIntegralSwitchUI(){
+  const track=document.getElementById('integral-enable-track');
+  const knob=document.getElementById('integral-enable-knob');
+  if(track){
+    track.style.background=integralState.enabled?'var(--accent)':'var(--btn)';
+    track.style.borderColor=integralState.enabled?'var(--accent)':'var(--border)';
+  }
+  if(knob) knob.style.left=integralState.enabled?'18px':'1px';
+}
+
+function onIntegralFnChange(){
+  const sel=document.getElementById('integral-fn');
+  if(!sel) return;
+  integralState.fnKey=sel.value;
+  const entry=getIntegrableFunctions().find(e=>e.key===integralState.fnKey);
+  if(entry) setDefaultIntegralBounds(entry);
+  renderCombinedChart();
+}
+
+function onIntegralBoundsChange(){
+  const loEl=document.getElementById('integral-lo');
+  const hiEl=document.getElementById('integral-hi');
+  if(!loEl||!hiEl) return;
+  let lo=parseFloat(loEl.value.replace(',','.'));
+  let hi=parseFloat(hiEl.value.replace(',','.'));
+
+  const entry=getIntegrableFunctions().find(e=>e.key===integralState.fnKey);
+  if(entry && Number.isFinite(entry.xMin) && Number.isFinite(entry.xMax)){
+    if(!isNaN(lo)) lo=Math.min(Math.max(lo, entry.xMin), entry.xMax);
+    if(!isNaN(hi)) hi=Math.min(Math.max(hi, entry.xMin), entry.xMax);
+  }
+
+  if(!isNaN(lo)) integralState.lo=lo;
+  if(!isNaN(hi)) integralState.hi=hi;
+  renderCombinedChart();
+}
+
+function refreshIntegralPanel(){
+  updateIntegralSwitchUI();
+  if(!combineState.open) return;
+
+  const msgEl=document.getElementById('integral-msg');
+  const fnRow=document.getElementById('integral-fn-row');
+  const boundsRow=document.getElementById('integral-bounds-row');
+  const resultEl=document.getElementById('integral-result');
+  const selEl=document.getElementById('integral-fn');
+  const loEl=document.getElementById('integral-lo');
+  const hiEl=document.getElementById('integral-hi');
+
+  const list=getIntegrableFunctions();
+
+  if(!list.length){
+    if(fnRow) fnRow.style.display='none';
+    if(boundsRow) boundsRow.style.display='none';
+    if(resultEl) resultEl.style.display='none';
+    if(msgEl) msgEl.style.display='block';
+    integralState.fnKey=null; integralState.enabled=false;
+    updateIntegralSwitchUI();
+    return;
+  }
+
+  if(msgEl) msgEl.style.display='none';
+  if(fnRow) fnRow.style.display='';
+  if(boundsRow) boundsRow.style.display='';
+
+  if(!list.some(e=>e.key===integralState.fnKey)){
+    integralState.fnKey=list[0].key;
+    setDefaultIntegralBounds(list[0]);
+  }
+
+  if(selEl){
+    selEl.innerHTML=list.map(e=>
+      `<option value="${escapeHtmlAttr(e.key)}"${e.key===integralState.fnKey?' selected':''}>${escapeHtmlAttr(e.label)}</option>`).join('');
+  }
+  const fmt=v=>Number.isFinite(v)?parseFloat(v.toPrecision(6)):'';
+  if(loEl && document.activeElement!==loEl) loEl.value=fmt(integralState.lo);
+  if(hiEl && document.activeElement!==hiEl) hiEl.value=fmt(integralState.hi);
+
+  const entry=list.find(e=>e.key===integralState.fnKey);
+
+  if(!integralState.enabled || !entry){
+    if(resultEl) resultEl.style.display='none';
+    return;
+  }
+
+  const res=computeIntegralResult(entry, integralState.lo, integralState.hi);
+  if(resultEl){
+    if(res){
+      resultEl.style.display='block';
+      let html=`Integrál na ⟨${f6(res.lo)}; ${f6(res.hi)}⟩:<br>`+
+               `<b>I ≈ ${f6(res.value)}</b><br>`;
+      if(res.ciHalfWidth!==null){
+        html+=`95% IS: ${f6(res.value-res.ciHalfWidth)} – ${f6(res.value+res.ciHalfWidth)}`;
+      } else {
+        html+=`<span style="color:var(--text-muted);">(nejistotu nelze u kombinace spočítat)</span>`;
+      }
+      resultEl.innerHTML=html;
+    } else {
+      resultEl.style.display='none';
+    }
+  }
+}
+
 function renderCombinedChart(){
   renderTabsUI();
+  refreshCombinePanelOptions();
+  refreshIntegralPanel();
   if(chartInst){chartInst.destroy();chartInst=null;}
 
   const activeDatasets=datasets
@@ -1408,6 +1897,19 @@ function renderCombinedChart(){
       }
     }
   });
+
+  if(combineState.enabled){
+    const combinedSeries=computeCombinedSeries();
+    if(combinedSeries) combinedDatasets.push(combinedSeries);
+  }
+
+  if(integralState.enabled){
+    const entry=getIntegrableFunctions().find(e=>e.key===integralState.fnKey);
+    if(entry){
+      const areaSeries=computeIntegralAreaSeries(entry, integralState.lo, integralState.hi);
+      if(areaSeries) combinedDatasets.push(areaSeries);
+    }
+  }
 
   const c=chartColors();
   const activeLabels=datasets[activeDatasetIdx];

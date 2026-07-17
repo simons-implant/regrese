@@ -148,6 +148,21 @@ select#rType:focus{border-color:var(--accent);}
 .eq-fitted{
   font-size:15px;color:var(--accent);
 }
+.eq-combined{
+  display:none;
+  margin-top:8px;padding-top:8px;
+  border-top:1px dashed var(--border);
+}
+.eq-combined-label{
+  font-size:10px;color:var(--text-muted);font-family:'Sora',sans-serif;
+  text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;display:block;
+}
+.eq-combined-general{
+  font-size:13px;color:var(--text-muted);margin-bottom:4px;
+}
+.eq-combined-fitted{
+  font-size:15px;color:#c83030;
+}
 .side-panel{
   display:flex;flex-direction:column;gap:8px;
   width:280px;flex-shrink:0;
@@ -272,6 +287,58 @@ select#rType:focus{border-color:var(--accent);}
   background:linear-gradient(135deg, rgba(200,48,48,0.14), var(--surface) 55%);
   border-color:#c83030;
   box-shadow:0 0 0 1px rgba(200,48,48,0.25), var(--shadow);
+}
+
+#btn-combine.active{opacity:1;color:var(--accent);}
+
+.combine-panel{
+  width:0;flex-shrink:0;overflow:hidden;
+  display:flex;flex-direction:column;gap:10px;
+  background:var(--surface);border:1px solid transparent;border-radius:12px;
+  box-shadow:none;opacity:0;padding:12px 0;
+  transition:width .25s ease,opacity .2s ease,padding .25s ease,border-color .25s,box-shadow .25s;
+}
+.combine-panel.open{
+  width:280px;opacity:1;padding:12px;
+  border-color:var(--border);box-shadow:var(--shadow);
+}
+.combine-panel-close{
+  background:transparent;border:none;cursor:pointer;color:var(--text-muted);
+  padding:2px;line-height:1;flex-shrink:0;transition:color .15s;
+}
+.combine-panel-close:hover{color:var(--text);}
+.combine-op-row{display:flex;gap:6px;}
+.combine-op-btn{
+  flex:1;padding:6px 0;border-radius:7px;border:1px solid var(--border);
+  background:var(--btn);color:var(--text);cursor:pointer;font-family:'Sora',sans-serif;
+  font-size:15px;font-weight:600;transition:background .15s,color .15s,border-color .15s;
+}
+.combine-op-btn:hover{background:var(--btn-h);}
+.combine-op-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;}
+.combine-select{
+  width:100%;background:var(--btn);color:var(--text);border:1px solid var(--border);
+  border-radius:7px;padding:5px 6px;font-family:'Sora',sans-serif;font-size:11.5px;outline:none;
+}
+.combine-field-label{
+  font-size:10.5px;color:var(--text-muted);font-family:'Sora',sans-serif;
+  margin-bottom:3px;display:block;
+}
+.combine-tool-label{
+  font-size:11px;font-weight:600;color:var(--accent);font-family:'Sora',sans-serif;
+  margin-top:-4px;
+}
+.combine-eq{
+  font-family:'Sora',sans-serif;font-size:11px;color:var(--text);
+  padding-top:8px;border-top:1px solid var(--border);
+}
+.combine-fn-block{
+  margin-bottom:8px;font-size:11px;line-height:1.65;color:var(--text);
+  word-break:break-word;
+}
+.combine-fn-block:last-child{margin-bottom:0;}
+.combine-fn-type{color:var(--text-muted);font-weight:400;}
+.combine-msg{
+  font-size:11px;color:var(--text-muted);font-family:'Sora',sans-serif;line-height:1.5;
 }
 
 .sec-label{
@@ -453,7 +520,7 @@ td input.cell:focus{
 <body>
 <div class="app">
   <header class="topbar" id="topBar">
-    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.4.5</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím. Aplikace používá anonymní analytiku návštěvnosti (GoatCounter) bez cookies a osobních údajů.</span></div></div>
+    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.5.0</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím. Aplikace používá anonymní analytiku návštěvnosti (GoatCounter) bez cookies a osobních údajů.</span></div></div>
     <div class="spacer"></div>
     <button onclick="openNavod()"
       title="Návod k použití"
@@ -536,6 +603,11 @@ td input.cell:focus{
       <div class="eq-bar" id="eqBar">
         <div id="eq-general" class="eq-general"></div>
         <div id="resEq" class="eq-fitted"></div>
+        <div id="combine-eq-line" class="eq-combined">
+          <span class="eq-combined-label">Výsledná funkce</span>
+          <div id="combine-eq-general" class="eq-combined-general"></div>
+          <div id="combine-eq-tex" class="eq-combined-fitted"></div>
+        </div>
       </div>
     </div>
 
@@ -574,6 +646,10 @@ td input.cell:focus{
         <button id="btn-regrese" onclick="toggleRegression()" title="Spustit analýzu"
           style="background:transparent;border:none;cursor:pointer;font-size:17px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" stroke="none"><polygon points="6 3 20 12 6 21 6 3"/></svg><span class="btn-lbl">spustit<br>analýzu</span></button>
+
+        <button id="btn-combine" onclick="toggleCombinePanel()" title="Matematické nástroje (kombinace funkcí a další)"
+          style="background:transparent;border:none;cursor:pointer;font-size:15px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s,color .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity=this.classList.contains('active')?'1':'.6'"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg><span class="btn-lbl">nástroje</span></button>
 
       </div>
 
@@ -715,7 +791,85 @@ td input.cell:focus{
         </a>
       </div>
     </div>
+
+    <div class="combine-panel" id="combine-panel">
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <span class="sec-label" style="padding-left:0;">Nástroje</span>
+        <button class="combine-panel-close" onclick="toggleCombinePanel()" title="Zavřít">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;">
+        <span class="combine-tool-label">Kombinace funkcí</span>
+        <div id="combine-enable-track" onclick="toggleCombineEnabled()" title="Zapnout/vypnout kombinaci funkcí"
+          style="position:relative;width:34px;height:19px;border-radius:10px;cursor:pointer;
+                 background:var(--btn);border:1px solid var(--border);transition:background .2s,border-color .2s;
+                 flex-shrink:0;">
+          <div id="combine-enable-knob" style="position:absolute;top:1px;left:1px;width:15px;height:15px;
+               border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);
+               transition:left .2s;"></div>
+        </div>
+      </div>
+
+      <div class="combine-msg" id="combine-msg">Potřebuješ alespoň 2 nafitované regrese.</div>
+
+      <div class="combine-op-row" id="combine-op-row">
+        <button class="combine-op-btn" data-op="+" onclick="setCombineOp('+')">+</button>
+        <button class="combine-op-btn" data-op="-" onclick="setCombineOp('-')">−</button>
+        <button class="combine-op-btn" data-op="*" onclick="setCombineOp('*')">×</button>
+      </div>
+
+      <div>
+        <label class="combine-field-label">Funkce A</label>
+        <select id="combine-ds-a" class="combine-select" onchange="onCombineSelectChange()"></select>
+      </div>
+      <div>
+        <label class="combine-field-label">Funkce B</label>
+        <select id="combine-ds-b" class="combine-select" onchange="onCombineSelectChange()"></select>
+      </div>
+
+      <div class="combine-eq" id="combine-result-eq"></div>
+
+      <div style="border-top:1px solid var(--border);margin-top:2px;padding-top:10px;display:flex;flex-direction:column;gap:10px;">
+
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span class="combine-tool-label">Integrál</span>
+          <div id="integral-enable-track" onclick="toggleIntegralEnabled()" title="Zapnout/vypnout výpočet integrálu"
+            style="position:relative;width:34px;height:19px;border-radius:10px;cursor:pointer;
+                   background:var(--btn);border:1px solid var(--border);transition:background .2s,border-color .2s;
+                   flex-shrink:0;">
+            <div id="integral-enable-knob" style="position:absolute;top:1px;left:1px;width:15px;height:15px;
+                 border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);
+                 transition:left .2s;"></div>
+          </div>
+        </div>
+
+        <div class="combine-msg" id="integral-msg">Potřebuješ alespoň 1 nafitovanou regresi.</div>
+
+        <div id="integral-fn-row" style="display:none;">
+          <label class="combine-field-label">Funkce</label>
+          <select id="integral-fn" class="combine-select" onchange="onIntegralFnChange()"></select>
+        </div>
+
+        <div id="integral-bounds-row" style="display:none;">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <div>
+              <label class="combine-field-label">Mez a</label>
+              <input id="integral-lo" type="text" class="combine-select" style="text-align:center;font-family:'Fira Code',monospace;" oninput="onIntegralBoundsChange()" onblur="renderCombinedChart()">
+            </div>
+            <div>
+              <label class="combine-field-label">Mez b</label>
+              <input id="integral-hi" type="text" class="combine-select" style="text-align:center;font-family:'Fira Code',monospace;" oninput="onIntegralBoundsChange()" onblur="renderCombinedChart()">
+            </div>
+          </div>
+        </div>
+
+        <div class="combine-eq" id="integral-result" style="display:none;border-top:none;padding-top:0;"></div>
+
+      </div>
     </div>
+
   </div>
 </div>
 
