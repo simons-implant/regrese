@@ -12,8 +12,8 @@ let showCI = false;
 let axisLabels = {x:'x', y:'y'};
 let axisLabelsFromFile = false;
 let manualRange = {active:false, xMin:null, xMax:null, yMin:null, yMax:null}; // true pouze pokud byla detekována hlavička ze souboru
-let combineState = {open:false, enabled:false, op:'+', dsA:null, dsB:null};
-let integralState = {enabled:false, fnKey:null, lo:null, hi:null};
+let combineState = {open:false, enabled:false, expanded:false, op:'+', dsA:null, dsB:null};
+let integralState = {enabled:false, expanded:false, fnKey:null, lo:null, hi:null};
 const REGRESSION_TYPE_SHORT = {
   linear:'Lineární', exponential:'Exponenciální', polynomial:'Polynomická',
   logarithmic:'Logaritmická', gaussian:'Gauss', gaussian2:'2× Gauss',
@@ -435,7 +435,11 @@ function getSessionState(){
       hiddenSeries:ds.hiddenSeries||{data:false,excl:false,fit:false,ci:false},
       customFormula:ds.customFormula||null,
       pointStyle:ds.pointStyle||'circle'
-    }))
+    })),
+    tools:{
+      combine:{enabled:combineState.enabled, op:combineState.op, dsA:combineState.dsA, dsB:combineState.dsB},
+      integral:{enabled:integralState.enabled, fnKey:integralState.fnKey, lo:integralState.lo, hi:integralState.hi}
+    }
   };
 }
 
@@ -552,6 +556,28 @@ function applySessionState(state){
   lastResult=activeDs.lastResult;
   lastData={x:activeDs.x,y:activeDs.y,excl:activeDs.excl};
   lastFourierResult=(activeDs.regressionType==='fourier')?activeDs.lastResult:lastFourierResult;
+
+  const tools=state.tools||{};
+  const c=tools.combine||{};
+  combineState.op = (c.op==='+'||c.op==='-'||c.op==='*') ? c.op : '+';
+  combineState.dsA = Number.isInteger(c.dsA) && c.dsA>=0 && c.dsA<datasets.length ? c.dsA : null;
+  combineState.dsB = Number.isInteger(c.dsB) && c.dsB>=0 && c.dsB<datasets.length ? c.dsB : null;
+  combineState.enabled = !!c.enabled && combineState.dsA!==null && combineState.dsB!==null && combineState.dsA!==combineState.dsB;
+  combineState.open=false; combineState.expanded=false;
+
+  const it=tools.integral||{};
+  integralState.fnKey = typeof it.fnKey==='string' ? it.fnKey : null;
+  integralState.lo = Number.isFinite(it.lo) ? it.lo : null;
+  integralState.hi = Number.isFinite(it.hi) ? it.hi : null;
+  integralState.enabled = !!it.enabled;
+  integralState.expanded=false;
+
+  const panel=document.getElementById('combine-panel');
+  const btn=document.getElementById('btn-combine');
+  if(panel) panel.classList.remove('open');
+  if(btn) btn.classList.remove('active');
+  updateToolExpandUI();
+
   renderCombinedChart();
 }
 
@@ -1355,6 +1381,24 @@ function toggleCombinePanel(){
   if(panel) panel.classList.toggle('open', combineState.open);
   if(btn) btn.classList.toggle('active', combineState.open);
   renderCombinedChart();
+}
+
+function toggleToolExpand(tool){
+  if(tool==='combine') combineState.expanded=!combineState.expanded;
+  else if(tool==='integral') integralState.expanded=!integralState.expanded;
+  updateToolExpandUI();
+}
+
+function updateToolExpandUI(){
+  const cBody=document.getElementById('combine-tool-body');
+  const cChevron=document.getElementById('combine-chevron');
+  if(cBody) cBody.classList.toggle('expanded', combineState.expanded);
+  if(cChevron) cChevron.classList.toggle('expanded', combineState.expanded);
+
+  const iBody=document.getElementById('integral-tool-body');
+  const iChevron=document.getElementById('integral-chevron');
+  if(iBody) iBody.classList.toggle('expanded', integralState.expanded);
+  if(iChevron) iChevron.classList.toggle('expanded', integralState.expanded);
 }
 
 function toggleCombineEnabled(){
@@ -2302,10 +2346,15 @@ function getVisibleLegendItems(dsIdxList){
   if(typeof labelOpts.filter==='function'){
     items=items.filter(it=>labelOpts.filter(it, chartInst.data));
   }
+  const TOOL_KINDS=['combine','integral-area'];
   return items.filter(it=>{
     const dsCfg=chartInst.data.datasets[it.datasetIndex];
-    if(!dsCfg || dsCfg._dsIdx===undefined) return false;
-    if(!dsIdxList.includes(dsCfg._dsIdx)) return false;
+    if(!dsCfg) return false;
+    if(dsCfg._dsIdx!==undefined){
+      if(!dsIdxList.includes(dsCfg._dsIdx)) return false;
+    } else if(!TOOL_KINDS.includes(dsCfg._kind)){
+      return false;
+    }
     return !it.hidden;
   });
 }
@@ -2340,6 +2389,33 @@ function svgLegendRows(rows, W){
     });
   });
   return svg;
+}
+
+function svgCombinedCurve(px, py){
+  if(!combineState.enabled) return '';
+  const series=computeCombinedSeries();
+  if(!series) return '';
+  const pts=series.data.filter(p=>Number.isFinite(p.y)).map(p=>[px(p.x),py(p.y)]);
+  if(pts.length<2) return '';
+  const d=pts.map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  return `<path d="${d}" fill="none" stroke="#c83030" stroke-width="2.5" stroke-dasharray="7,4" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+function svgIntegralArea(px, py, ml, mt, pw, ph){
+  if(!integralState.enabled) return '';
+  const entry=getIntegrableFunctions().find(e=>e.key===integralState.fnKey);
+  if(!entry) return '';
+  const series=computeIntegralAreaSeries(entry, integralState.lo, integralState.hi);
+  if(!series || !series.data.length) return '';
+
+  const clip=p=>[Math.max(ml,Math.min(ml+pw,px(p.x))), Math.max(mt,Math.min(mt+ph,py(p.y)))];
+  const topPts=series.data.map(clip);
+  const baselineY=Math.max(mt,Math.min(mt+ph,py(0)));
+  const poly=[...topPts,[topPts[topPts.length-1][0],baselineY],[topPts[0][0],baselineY]]
+    .map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  const dTop=topPts.map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+  return `<polygon points="${poly}" fill="rgba(200,48,48,0.18)"/>`+
+         `<path d="${dTop}" fill="none" stroke="rgba(200,48,48,0.55)" stroke-width="1.5"/>`;
 }
 
 function saveGraphSVG(){
@@ -2390,6 +2466,7 @@ function saveGraphSVG(){
   svg+=svgLegendRows(legendRows, W);
   svg+=svgAxesAndGrid(ml,mt,pw,ph,xMin,xMax,yMin,yMax);
   svg+=svgAxisTitles(W,H,ml,mt,pw,ph,axisLabels.x,axisLabels.y);
+  svg+=svgIntegralArea(px,py,ml,mt,pw,ph);
 
   if(ciVisible){
     const clip=p=>[Math.max(ml,Math.min(ml+pw,px(p.x))), Math.max(mt,Math.min(mt+ph,py(p.y)))];
@@ -2419,6 +2496,8 @@ function saveGraphSVG(){
   if(exclVisible){
     excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), 6, 'none', col.excl, 2); });
   }
+
+  svg+=svgCombinedCurve(px,py);
 
   svg+=`</svg>`;
 
@@ -2456,6 +2535,7 @@ function saveGraphAllSVG(){
   svg+=svgAxesAndGrid(ml,mt,pw,ph,xMin,xMax,yMin,yMax);
   const activeLabels=datasets[activeDatasetIdx];
   svg+=svgAxisTitles(W,H,ml,mt,pw,ph,activeLabels.xLabel,activeLabels.yLabel);
+  svg+=svgIntegralArea(px,py,ml,mt,pw,ph);
 
   activeDatasetsList.forEach(({ds,i})=>{
     const col=DATASET_COLORS[i%DATASET_COLORS.length];
@@ -2510,6 +2590,8 @@ function saveGraphAllSVG(){
       excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), 6, 'none', col.excl, 2); });
     }
   });
+
+  svg+=svgCombinedCurve(px,py);
 
   svg+=`</svg>`;
 

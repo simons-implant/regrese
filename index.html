@@ -325,8 +325,25 @@ select#rType:focus{border-color:var(--accent);}
 }
 .combine-tool-label{
   font-size:11px;font-weight:600;color:var(--accent);font-family:'Sora',sans-serif;
-  margin-top:-4px;
+  flex:1;
 }
+.combine-tool-section{
+  display:flex;flex-direction:column;
+}
+.combine-tool-section:not(:first-child){
+  border-top:1px solid var(--border);margin-top:2px;padding-top:10px;
+}
+.combine-tool-header{
+  display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;
+}
+.combine-tool-chevron{
+  flex-shrink:0;color:var(--text-muted);transition:transform .2s;
+}
+.combine-tool-chevron.expanded{transform:rotate(90deg);}
+.combine-tool-body{
+  display:none;flex-direction:column;gap:10px;margin-top:10px;
+}
+.combine-tool-body.expanded{display:flex;}
 .combine-eq{
   font-family:'Sora',sans-serif;font-size:11px;color:var(--text);
   padding-top:8px;border-top:1px solid var(--border);
@@ -520,7 +537,7 @@ td input.cell:focus{
 <body>
 <div class="app">
   <header class="topbar" id="topBar">
-    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.5.0</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím. Aplikace používá anonymní analytiku návštěvnosti (GoatCounter) bez cookies a osobních údajů.</span></div></div>
+    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.5.1</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím. Aplikace používá anonymní analytiku návštěvnosti (GoatCounter) bez cookies a osobních údajů.</span></div></div>
     <div class="spacer"></div>
     <button onclick="openNavod()"
       title="Návod k použití"
@@ -800,42 +817,47 @@ td input.cell:focus{
         </button>
       </div>
 
-      <div style="display:flex;align-items:center;justify-content:space-between;">
-        <span class="combine-tool-label">Kombinace funkcí</span>
-        <div id="combine-enable-track" onclick="toggleCombineEnabled()" title="Zapnout/vypnout kombinaci funkcí"
-          style="position:relative;width:34px;height:19px;border-radius:10px;cursor:pointer;
-                 background:var(--btn);border:1px solid var(--border);transition:background .2s,border-color .2s;
-                 flex-shrink:0;">
-          <div id="combine-enable-knob" style="position:absolute;top:1px;left:1px;width:15px;height:15px;
-               border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);
-               transition:left .2s;"></div>
+      <div class="combine-tool-section">
+        <div class="combine-tool-header" onclick="toggleToolExpand('combine')">
+          <svg class="combine-tool-chevron" id="combine-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+          <span class="combine-tool-label">Kombinace funkcí</span>
+          <div id="combine-enable-track" onclick="event.stopPropagation(); toggleCombineEnabled()" title="Zapnout/vypnout kombinaci funkcí"
+            style="position:relative;width:34px;height:19px;border-radius:10px;cursor:pointer;
+                   background:var(--btn);border:1px solid var(--border);transition:background .2s,border-color .2s;
+                   flex-shrink:0;">
+            <div id="combine-enable-knob" style="position:absolute;top:1px;left:1px;width:15px;height:15px;
+                 border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.35);
+                 transition:left .2s;"></div>
+          </div>
+        </div>
+
+        <div class="combine-tool-body" id="combine-tool-body">
+          <div class="combine-msg" id="combine-msg">Potřebuješ alespoň 2 nafitované regrese.</div>
+
+          <div class="combine-op-row" id="combine-op-row">
+            <button class="combine-op-btn" data-op="+" onclick="setCombineOp('+')">+</button>
+            <button class="combine-op-btn" data-op="-" onclick="setCombineOp('-')">−</button>
+            <button class="combine-op-btn" data-op="*" onclick="setCombineOp('*')">×</button>
+          </div>
+
+          <div>
+            <label class="combine-field-label">Funkce A</label>
+            <select id="combine-ds-a" class="combine-select" onchange="onCombineSelectChange()"></select>
+          </div>
+          <div>
+            <label class="combine-field-label">Funkce B</label>
+            <select id="combine-ds-b" class="combine-select" onchange="onCombineSelectChange()"></select>
+          </div>
+
+          <div class="combine-eq" id="combine-result-eq"></div>
         </div>
       </div>
 
-      <div class="combine-msg" id="combine-msg">Potřebuješ alespoň 2 nafitované regrese.</div>
-
-      <div class="combine-op-row" id="combine-op-row">
-        <button class="combine-op-btn" data-op="+" onclick="setCombineOp('+')">+</button>
-        <button class="combine-op-btn" data-op="-" onclick="setCombineOp('-')">−</button>
-        <button class="combine-op-btn" data-op="*" onclick="setCombineOp('*')">×</button>
-      </div>
-
-      <div>
-        <label class="combine-field-label">Funkce A</label>
-        <select id="combine-ds-a" class="combine-select" onchange="onCombineSelectChange()"></select>
-      </div>
-      <div>
-        <label class="combine-field-label">Funkce B</label>
-        <select id="combine-ds-b" class="combine-select" onchange="onCombineSelectChange()"></select>
-      </div>
-
-      <div class="combine-eq" id="combine-result-eq"></div>
-
-      <div style="border-top:1px solid var(--border);margin-top:2px;padding-top:10px;display:flex;flex-direction:column;gap:10px;">
-
-        <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div class="combine-tool-section">
+        <div class="combine-tool-header" onclick="toggleToolExpand('integral')">
+          <svg class="combine-tool-chevron" id="integral-chevron" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
           <span class="combine-tool-label">Integrál</span>
-          <div id="integral-enable-track" onclick="toggleIntegralEnabled()" title="Zapnout/vypnout výpočet integrálu"
+          <div id="integral-enable-track" onclick="event.stopPropagation(); toggleIntegralEnabled()" title="Zapnout/vypnout výpočet integrálu"
             style="position:relative;width:34px;height:19px;border-radius:10px;cursor:pointer;
                    background:var(--btn);border:1px solid var(--border);transition:background .2s,border-color .2s;
                    flex-shrink:0;">
@@ -845,28 +867,29 @@ td input.cell:focus{
           </div>
         </div>
 
-        <div class="combine-msg" id="integral-msg">Potřebuješ alespoň 1 nafitovanou regresi.</div>
+        <div class="combine-tool-body" id="integral-tool-body">
+          <div class="combine-msg" id="integral-msg">Potřebuješ alespoň 1 nafitovanou regresi.</div>
 
-        <div id="integral-fn-row" style="display:none;">
-          <label class="combine-field-label">Funkce</label>
-          <select id="integral-fn" class="combine-select" onchange="onIntegralFnChange()"></select>
-        </div>
+          <div id="integral-fn-row" style="display:none;">
+            <label class="combine-field-label">Funkce</label>
+            <select id="integral-fn" class="combine-select" onchange="onIntegralFnChange()"></select>
+          </div>
 
-        <div id="integral-bounds-row" style="display:none;">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-            <div>
-              <label class="combine-field-label">Mez a</label>
-              <input id="integral-lo" type="text" class="combine-select" style="text-align:center;font-family:'Fira Code',monospace;" oninput="onIntegralBoundsChange()" onblur="renderCombinedChart()">
-            </div>
-            <div>
-              <label class="combine-field-label">Mez b</label>
-              <input id="integral-hi" type="text" class="combine-select" style="text-align:center;font-family:'Fira Code',monospace;" oninput="onIntegralBoundsChange()" onblur="renderCombinedChart()">
+          <div id="integral-bounds-row" style="display:none;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+              <div>
+                <label class="combine-field-label">Mez a</label>
+                <input id="integral-lo" type="text" class="combine-select" style="text-align:center;font-family:'Fira Code',monospace;" oninput="onIntegralBoundsChange()" onblur="renderCombinedChart()">
+              </div>
+              <div>
+                <label class="combine-field-label">Mez b</label>
+                <input id="integral-hi" type="text" class="combine-select" style="text-align:center;font-family:'Fira Code',monospace;" oninput="onIntegralBoundsChange()" onblur="renderCombinedChart()">
+              </div>
             </div>
           </div>
+
+          <div class="combine-eq" id="integral-result" style="display:none;border-top:none;padding-top:0;"></div>
         </div>
-
-        <div class="combine-eq" id="integral-result" style="display:none;border-top:none;padding-top:0;"></div>
-
       </div>
     </div>
 
