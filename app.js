@@ -452,7 +452,10 @@ function getSessionState(){
       combine:{enabled:combineState.enabled, op:combineState.op, dsA:combineState.dsA, dsB:combineState.dsB},
       integral:{enabled:integralState.enabled, fnKey:integralState.fnKey, lo:integralState.lo, hi:integralState.hi},
       derivative:{enabled:derivativeState.enabled, fnKey:derivativeState.fnKey, x0:derivativeState.x0}
-    }
+    },
+    // Nastavení Pokročilého průvodce exportem (fonty, barvy, TeX texty, pozice,
+    // styl bodů/čar, legenda) — ať cestuje s projektem, ne jen v cache prohlížeče.
+    advExportPrefs: loadAdvExportPrefs()
   };
 }
 
@@ -504,6 +507,11 @@ function loadSession(input){
 }
 
 function applySessionState(state){
+  // Nastavení Pokročilého průvodce exportem uložené v projektu se propíše do
+  // cache prohlížeče, aby ho průvodce použil hned při příštím otevření.
+  if(state.advExportPrefs){
+    try{ localStorage.setItem(ADV_EXPORT_PREFS_KEY, JSON.stringify(state.advExportPrefs)); }catch(e){ /* nevadí */ }
+  }
   if(Array.isArray(state.customEquationLibrary)){
     state.customEquationLibrary.forEach(eq=>{
       if(!eq||!eq.formula||!eq.name) return;
@@ -619,6 +627,17 @@ function toggleCI(){
 function toggleRtypeDropdown(){
   const dd=document.getElementById('rtype-dropdown');
   dd.classList.toggle('open');
+}
+
+function toggleExportDropdown(which){
+  const id='export-dropdown-'+which;
+  const dd=document.getElementById(id);
+  const wasOpen=dd.classList.contains('open');
+  closeExportDropdowns();
+  if(!wasOpen) dd.classList.add('open');
+}
+function closeExportDropdowns(){
+  document.querySelectorAll('.export-wrap .rtype-dropdown.open').forEach(d=>d.classList.remove('open'));
 }
 
 function selectRtype(value, btn){
@@ -879,6 +898,9 @@ document.addEventListener('click',e=>{
   }
   if(!e.target.closest('.ds-point-wrap')){
     document.querySelectorAll('.ds-point-dropdown.open').forEach(d=>d.classList.remove('open'));
+  }
+  if(!e.target.closest('.export-wrap')){
+    closeExportDropdowns();
   }
 });
 
@@ -2664,7 +2686,8 @@ function svgAxisTitles(W, H, ml, mt, pw, ph, xLabel, yLabel){
 // Sestaví legendu úplně stejně, jako to dělá živý Chart.js graf
 // (generateLabels + jeho vlastní filter), jen omezenou na vybrané datasety
 // a jen na aktuálně viditelné položky — zaručuje shodu s náhledem v appce.
-function getVisibleLegendItems(dsIdxList){
+function getVisibleLegendItems(dsIdxList, includeTools){
+  if(includeTools===undefined) includeTools=true;
   if(!chartInst) return [];
   const labelOpts=chartInst.options?.plugins?.legend?.labels;
   if(!labelOpts || typeof labelOpts.generateLabels!=='function') return [];
@@ -2678,7 +2701,7 @@ function getVisibleLegendItems(dsIdxList){
     if(!dsCfg) return false;
     if(dsCfg._dsIdx!==undefined){
       if(!dsIdxList.includes(dsCfg._dsIdx)) return false;
-    } else if(!TOOL_KINDS.includes(dsCfg._kind)){
+    } else if(!includeTools || !TOOL_KINDS.includes(dsCfg._kind)){
       return false;
     }
     return !it.hidden;
@@ -2790,7 +2813,7 @@ function saveGraphSVG(){
   const ciVisible=!!ci;
 
   // Legenda — přesně ta samá data (barvy/tvary/pořadí), jaká vidí uživatel v appce
-  const legendItems=getVisibleLegendItems([activeDatasetIdx]);
+  const legendItems=getVisibleLegendItems([activeDatasetIdx], false);
 
   const W=900,H=600,ml=60,mr=30,mb=60;
   const legendRows=layoutLegendRows(legendItems, W-40);
@@ -2806,7 +2829,6 @@ function saveGraphSVG(){
   svg+=svgLegendRows(legendRows, W);
   svg+=svgAxesAndGrid(ml,mt,pw,ph,xMin,xMax,yMin,yMax);
   svg+=svgAxisTitles(W,H,ml,mt,pw,ph,axisLabels.x,axisLabels.y);
-  svg+=svgIntegralArea(px,py,ml,mt,pw,ph);
 
   if(ciVisible){
     const clip=p=>[Math.max(ml,Math.min(ml+pw,px(p.x))), Math.max(mt,Math.min(mt+ph,py(p.y)))];
@@ -2836,9 +2858,6 @@ function saveGraphSVG(){
   if(exclVisible){
     excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), 6, 'none', col.excl, 2); });
   }
-
-  svg+=svgCombinedCurve(px,py);
-  svg+=svgDerivativeTangent(px,py);
 
   svg+=`</svg>`;
 
@@ -2940,6 +2959,896 @@ function saveGraphAllSVG(){
   const a=document.createElement('a');
   a.href='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
   a.download='regrese_vsechna_data.svg';
+  a.click();
+}
+
+/* ══════════════════════════════════════════════
+   POKROČILÝ PRŮVODCE EXPORTEM
+   Samostatná, plně parametrizovaná verze SVG exportu s živým
+   náhledem — nemění chování rychlého uložení výše.
+══════════════════════════════════════════════ */
+let advExportState=null;
+let advDragCtx=null;
+
+function defaultAdvDatasetCfg(i, ds){
+  const col=DATASET_COLORS[i%DATASET_COLORS.length];
+  return {pointColor:col.point, pointStyle:ds.pointStyle, pointSize:6, lineColor:col.fit, lineWidth:2.5, dashed:false};
+}
+
+// Postaví čistě výchozí stav (bez ohledu na cokoliv uložené) — používá ho jak
+// první otevření průvodce (spolu s uloženými preferencemi, viz níže), tak
+// tlačítko "Obnovit výchozí".
+function buildDefaultAdvExportState(mode, activeDatasetsList){
+  const dsCfg={};
+  activeDatasetsList.forEach(({ds,i})=>{ dsCfg[i]=defaultAdvDatasetCfg(i,ds); });
+  const firstDs=activeDatasetsList[0].ds;
+  return {
+    mode,
+    dsIdxList: activeDatasetsList.map(({i})=>i),
+    bgColor:'#ffffff',
+    title:{show:false, text:'Regresní analýza', tex:false, fontSize:20, dx:0, dy:0},
+    // align: 'center' (vystředěno podél osy, výchozí) nebo 'edge' (u konce osy) —
+    // dx/dy z přetažení myší se k té zvolené základní pozici jen připočítávají.
+    xLabel:{text: mode==='all' ? firstDs.xLabel : axisLabels.x, tex:false, fontSize:12, align:'center', dx:0, dy:0},
+    yLabel:{text: mode==='all' ? firstDs.yLabel : axisLabels.y, tex:false, fontSize:12, align:'center', dx:0, dy:0},
+    tickFontSize:11, legendFontSize:11,
+    // min/max === null znamená "automaticky podle aktuálního zobrazení grafu";
+    // jakmile je vyplněné číslo, použije se místo toho.
+    xRange:{min:null, max:null}, yRange:{min:null, max:null},
+    datasets:dsCfg,
+    legend:{} // klíč = datasetIndex položky legendy → {text, tex, hidden}
+  };
+}
+
+// Vrátí skutečný rozsah osy, který se má vykreslit — buď ručně zadaný
+// (advExportState.xRange/yRange), nebo (když není platný) aktuální rozsah
+// živého grafu. axis je 'x' nebo 'y'.
+function advResolveAxisRange(axis){
+  const scale=chartInst && chartInst.scales && chartInst.scales[axis];
+  const chartMin=scale ? scale.min : 0, chartMax=scale ? scale.max : 1;
+  const r=advExportState ? advExportState[axis+'Range'] : null;
+  let min=(r && r.min!=null && isFinite(r.min)) ? r.min : chartMin;
+  let max=(r && r.max!=null && isFinite(r.max)) ? r.max : chartMax;
+  if(!(max>min)){ min=chartMin; max=chartMax; } // neplatný rozsah (max<=min) — spadni na automatický
+  return {min, max};
+}
+function advSetRangeField(axis, key, value){
+  if(!advExportState) return;
+  const r=advExportState[axis+'Range'];
+  const trimmed=String(value||'').trim();
+  const num=parseFloat(trimmed);
+  r[key]=(trimmed!=='' && isFinite(num)) ? num : null;
+  renderAdvExportPreview();
+  // Jen cílený update upozornění (ne celý renderAdvExportPanel), ať psaní do
+  // čísel neztrácí focus.
+  const warnEl=document.getElementById('adv-range-warning');
+  if(warnEl) warnEl.innerHTML=advRangeWarningHtml();
+}
+
+// Zjistí, jestli nějaká VYKRESLOVANÁ data (jen datasety z aktuálního
+// dsIdxList — u "uložit graf" tedy jen aktivní sada, u "uložit vše" všechny)
+// leží mimo aktuálně nastavený rozsah os.
+function advDataOutOfRangeInfo(){
+  if(!advExportState) return {xOut:false, yOut:false, anyOut:false};
+  const {min:xMin,max:xMax}=advResolveAxisRange('x');
+  const {min:yMin,max:yMax}=advResolveAxisRange('y');
+  let xOut=false, yOut=false;
+  advExportState.dsIdxList.forEach(i=>{
+    const ds=datasets[i];
+    if(!ds) return;
+    const check=(xi,yi)=>{
+      if(isFinite(xi) && (xi<xMin || xi>xMax)) xOut=true;
+      if(isFinite(yi) && (yi<yMin || yi>yMax)) yOut=true;
+    };
+    (ds.x||[]).forEach((xi,k)=>check(xi, ds.y[k]));
+    (ds.excl||[]).forEach(pt=>check(pt[0], pt[1]));
+  });
+  return {xOut, yOut, anyOut:xOut||yOut};
+}
+function advRangeWarningHtml(){
+  const info=advDataOutOfRangeInfo();
+  if(!info.anyOut) return '';
+  const which = info.xOut && info.yOut ? 'osa X i Y' : (info.xOut ? 'osa X' : 'osa Y');
+  return `<div class="adv-hint" style="color:#c83030;font-style:normal;margin-top:6px;">⚠ Část dat leží mimo nastavený rozsah (${which}) a v grafu se vykreslí mimo osy.</div>`;
+}
+function advResetRanges(){
+  if(!advExportState) return;
+  advExportState.xRange={min:null, max:null};
+  advExportState.yRange={min:null, max:null};
+  renderAdvExportPanel();
+  renderAdvExportPreview();
+}
+
+const ADV_EXPORT_PREFS_KEY='regrese_advExportPrefs';
+
+// Uloží "preferenční" část stavu (vše, co si uživatel v průvodci nastavil,
+// kromě mode/dsIdxList, které jsou dané aktuálním grafem) do cache prohlížeče,
+// aby se při dalším otevření průvodce (i po restartu appky) použila stejná.
+function persistAdvExportPrefs(){
+  if(!advExportState) return;
+  const st=advExportState;
+  const prefs={
+    bgColor:st.bgColor,
+    title:{show:st.title.show, text:st.title.text, tex:st.title.tex, fontSize:st.title.fontSize, dx:st.title.dx, dy:st.title.dy},
+    xLabel:{text:st.xLabel.text, tex:st.xLabel.tex, fontSize:st.xLabel.fontSize, align:st.xLabel.align, dx:st.xLabel.dx, dy:st.xLabel.dy},
+    yLabel:{text:st.yLabel.text, tex:st.yLabel.tex, fontSize:st.yLabel.fontSize, align:st.yLabel.align, dx:st.yLabel.dx, dy:st.yLabel.dy},
+    tickFontSize:st.tickFontSize, legendFontSize:st.legendFontSize,
+    xRange:st.xRange, yRange:st.yRange,
+    datasets:st.datasets, legend:st.legend
+  };
+  try{ localStorage.setItem(ADV_EXPORT_PREFS_KEY, JSON.stringify(prefs)); }catch(e){ /* např. soukromý režim — nevadí */ }
+}
+function loadAdvExportPrefs(){
+  try{
+    const raw=localStorage.getItem(ADV_EXPORT_PREFS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+function clearAdvExportPrefs(){
+  try{ localStorage.removeItem(ADV_EXPORT_PREFS_KEY); }catch(e){ /* nevadí */ }
+}
+// Aplikuje uložené preference na čerstvě postavený výchozí stav (v místě).
+function applyAdvExportPrefs(state, prefs){
+  if(!prefs) return;
+  if(prefs.bgColor) state.bgColor=prefs.bgColor;
+  if(prefs.title) Object.assign(state.title, prefs.title);
+  if(prefs.xLabel) Object.assign(state.xLabel, prefs.xLabel);
+  if(prefs.yLabel) Object.assign(state.yLabel, prefs.yLabel);
+  if(prefs.tickFontSize) state.tickFontSize=prefs.tickFontSize;
+  if(prefs.legendFontSize) state.legendFontSize=prefs.legendFontSize;
+  if(prefs.xRange) state.xRange=Object.assign({min:null,max:null}, prefs.xRange);
+  if(prefs.yRange) state.yRange=Object.assign({min:null,max:null}, prefs.yRange);
+  if(prefs.datasets){
+    Object.keys(state.datasets).forEach(idx=>{
+      if(prefs.datasets[idx]) Object.assign(state.datasets[idx], prefs.datasets[idx]);
+    });
+  }
+  if(prefs.legend) state.legend=JSON.parse(JSON.stringify(prefs.legend));
+}
+
+function openAdvancedExportWizard(mode){
+  if(mode==='single' && (!lastResult || !lastData || !chartInst)){ alert('Nejprve proveďte regresi.'); return; }
+  if(mode==='all'){
+    const nWithData=datasets.filter(ds=>ds.x.length>0||ds.excl.length>0).length;
+    if(nWithData<2){ alert('Pro export všech dat najednou potřebuješ alespoň 2 sady dat s daty.'); return; }
+  }
+  if(!chartInst){ alert('Nejprve zobraz graf.'); return; }
+
+  const activeDatasetsList = mode==='all'
+    ? datasets.map((ds,i)=>({ds,i})).filter(({ds})=>ds.x.length>0||ds.excl.length>0)
+    : [{ds:datasets[activeDatasetIdx], i:activeDatasetIdx}];
+
+  advExportState=buildDefaultAdvExportState(mode, activeDatasetsList);
+  applyAdvExportPrefs(advExportState, loadAdvExportPrefs());
+
+  document.getElementById('adv-export-overlay').style.display='flex';
+  document.body.style.overflow='hidden';
+  renderAdvExportPanel();
+  renderAdvExportPreview();
+  initAdvExportDragHandlers();
+}
+
+function resetAdvancedExportWizard(){
+  if(!advExportState) return;
+  if(!confirm('Opravdu obnovit veškeré nastavení pokročilého exportu (i to uložené v prohlížeči) na výchozí hodnoty?')) return;
+  clearAdvExportPrefs();
+  const activeDatasetsList=advExportState.dsIdxList.map(i=>({ds:datasets[i], i}));
+  advExportState=buildDefaultAdvExportState(advExportState.mode, activeDatasetsList);
+  renderAdvExportPanel();
+  renderAdvExportPreview();
+}
+
+function closeAdvancedExportWizard(){
+  document.getElementById('adv-export-overlay').style.display='none';
+  document.body.style.overflow='';
+  advExportState=null;
+  advDragCtx=null;
+}
+
+// Vrátí referenci na konkrétní objekt se stavem popisku pro dané "group":
+// 'title'/'xLabel'/'yLabel' jsou top-level pole, 'legend:<key>' je položka
+// legendy (líně založená, pokud ještě neexistuje) — díky tomu fungují
+// advSetField/advToggleTex/TeX editor generiky pro všechny popisky stejně.
+function advResolveFieldGroup(group){
+  if(!advExportState || !group) return null;
+  if(group.startsWith('legend:')){
+    const key=group.slice(7);
+    if(!advExportState.legend) advExportState.legend={};
+    if(!advExportState.legend[key]) advExportState.legend[key]={text:'', tex:false, hidden:false};
+    return advExportState.legend[key];
+  }
+  return advExportState[group] || null;
+}
+
+function advSetField(group,key,value){
+  const obj=advResolveFieldGroup(group);
+  if(!obj) return;
+  obj[key]=value;
+  renderAdvExportPreview();
+}
+
+// TeX režim se nezapíná jen zaškrtnutím — otevře se editor, kde se popisek
+// píše přímo v LaTeX syntaxi (viz openAdvTexEditor), s live náhledem.
+let advTexEditingGroup=null;
+function advToggleTex(group,checked){
+  const obj=advResolveFieldGroup(group);
+  if(!obj) return;
+  obj.tex=checked;
+  renderAdvExportPanel();
+  renderAdvExportPreview();
+  if(checked) openAdvTexEditor(group);
+}
+function openAdvTexEditor(group){
+  const obj=advResolveFieldGroup(group);
+  if(!obj) return;
+  advTexEditingGroup=group;
+  const titles={title:'TeX text — Záhlaví', xLabel:'TeX text — Popisek osy X', yLabel:'TeX text — Popisek osy Y'};
+  const titleEl=document.getElementById('adv-tex-title');
+  if(titleEl) titleEl.textContent = titles[group] || (group.startsWith('legend:') ? 'TeX text — položka legendy' : 'TeX text');
+  const input=document.getElementById('adv-tex-input');
+  input.value=obj.text||'';
+  document.getElementById('adv-tex-overlay').style.display='flex';
+  updateAdvTexPreview();
+  input.focus();
+}
+function closeAdvTexEditor(){
+  // Zavření bez potvrzení nechává TeX režim zapnutý s posledním potvrzeným textem —
+  // jestli ho uživatel ještě nikdy nepotvrdil, vrátí přepínač zpátky na obyčejný text.
+  const closeObj=advTexEditingGroup ? advResolveFieldGroup(advTexEditingGroup) : null;
+  if(closeObj && !closeObj.text){
+    closeObj.tex=false;
+    renderAdvExportPanel();
+    renderAdvExportPreview();
+  }
+  document.getElementById('adv-tex-overlay').style.display='none';
+  advTexEditingGroup=null;
+}
+function updateAdvTexPreview(){
+  if(!advTexEditingGroup) return;
+  const preview=document.getElementById('adv-tex-preview');
+  const raw=document.getElementById('adv-tex-input').value;
+  if(!raw.trim()){ preview.innerHTML='<span style="color:var(--text-muted);font-size:13px;">Náhled se zobrazí tady…</span>'; return; }
+  try{
+    const html=buildLabelHtml(raw);
+    if(!html || !html.trim()){
+      preview.innerHTML='<span style="color:#c83030;font-size:13px;">Neplatný TeX výraz</span>';
+      return;
+    }
+    preview.innerHTML=`<div style="font-family:'Sora',sans-serif;font-size:18px;color:var(--text);">${html}</div>`;
+  }catch(e){
+    preview.innerHTML='<span style="color:#c83030;font-size:13px;">Neplatný TeX výraz</span>';
+  }
+}
+function confirmAdvTexEditor(){
+  if(!advTexEditingGroup) return;
+  const obj=advResolveFieldGroup(advTexEditingGroup);
+  if(!obj) return;
+  const raw=document.getElementById('adv-tex-input').value;
+  obj.text=raw;
+  advTexEditingGroup=null;
+  document.getElementById('adv-tex-overlay').style.display='none';
+  renderAdvExportPanel();
+  renderAdvExportPreview();
+}
+function advSetTop(key,value){
+  if(!advExportState) return;
+  advExportState[key]=value;
+  renderAdvExportPreview();
+}
+function advSetDsField(i,key,value){
+  if(!advExportState) return;
+  advExportState.datasets[i][key]=value;
+  renderAdvExportPreview();
+}
+
+// Tlačítka "Zarovnat na střed" / "Zarovnat na okraj" u popisků os X/Y —
+// nastaví základní pozici a zruší jakékoliv předchozí ruční přetažení myší,
+// ať se popisek rovnou umístí na to správné místo.
+function advAlignLabel(group, align){
+  const obj=advResolveFieldGroup(group);
+  if(!obj) return;
+  obj.align=align; obj.dx=0; obj.dy=0;
+  renderAdvExportPanel();
+  renderAdvExportPreview();
+}
+
+// Dvojice tlačítek "Zarovnat na střed" / "Zarovnat na okraj" pro popisky os —
+// zvýrazní tu možnost, která je právě aktivní.
+function advAlignButtonsHtml(group, cfg){
+  const align=cfg.align||'center';
+  const btn=(val,label)=>{
+    const active=align===val;
+    return `<button type="button" onclick="advAlignLabel('${group}','${val}')"
+      style="flex:1;background:${active?'#7c3aed':'var(--btn)'};color:${active?'#fff':'var(--text)'};border:1px solid ${active?'#7c3aed':'var(--border)'};
+             border-radius:6px;padding:5px 6px;cursor:pointer;font-family:'Sora',sans-serif;font-size:11px;">${label}</button>`;
+  };
+  return `<div style="display:flex;gap:6px;margin-top:6px;">${btn('center','Zarovnat na střed')}${btn('edge','Zarovnat na okraj')}</div>`;
+}
+
+// Buď obyčejné textové pole (běžný popisek), nebo — je-li zapnutý TeX režim —
+// tlačítko, které otevře editor s LaTeX syntaxí a živým náhledem.
+function advTextFieldControl(group, cfg, placeholder){
+  if(cfg.tex){
+    const preview=cfg.text ? escapeXml(cfg.text.length>34 ? cfg.text.slice(0,34)+'…' : cfg.text) : '(prázdné)';
+    return `<button type="button" class="adv-tex-edit-btn" onclick="openAdvTexEditor('${group}')"
+      style="width:100%;box-sizing:border-box;text-align:left;background:var(--btn);color:var(--text);border:1px dashed var(--border);
+             border-radius:7px;padding:7px 9px;font-family:'Fira Code',monospace;font-size:11.5px;cursor:pointer;">
+      ✎ <span style="opacity:.75;">${preview}</span>
+    </button>`;
+  }
+  return `<input type="text" placeholder="${placeholder||''}" value="${escapeHtmlAttr(cfg.text)}" oninput="advSetField('${group}','text',this.value)">`;
+}
+
+function renderAdvExportPanel(){
+  const st=advExportState;
+  const panel=document.getElementById('adv-export-panel');
+  if(!panel || !st) return;
+
+  const dsRowsHtml=st.dsIdxList.map(i=>{
+    const ds=datasets[i];
+    const cfg=st.datasets[i];
+    const ptOptions=POINT_STYLES.map(p=>`<option value="${p.key}" ${cfg.pointStyle===p.key?'selected':''}>${p.icon} ${escapeXml(p.label)}</option>`).join('');
+    return `
+    <div class="adv-ds-row">
+      <div class="adv-ds-name">${escapeXml(ds.name||('Sada '+(i+1)))}</div>
+      <div class="adv-ds-grid">
+        <label>Barva bodů<input type="color" value="${cfg.pointColor}" oninput="advSetDsField(${i},'pointColor',this.value)"></label>
+        <label>Barva křivky<input type="color" value="${cfg.lineColor}" oninput="advSetDsField(${i},'lineColor',this.value)"></label>
+        <label>Tvar bodu<select onchange="advSetDsField(${i},'pointStyle',this.value)">${ptOptions}</select></label>
+        <label>Velikost bodu<input type="range" min="2" max="14" step="0.5" value="${cfg.pointSize}" oninput="advSetDsField(${i},'pointSize',parseFloat(this.value))"></label>
+        <label>Tloušťka čáry<input type="range" min="0.5" max="6" step="0.25" value="${cfg.lineWidth}" oninput="advSetDsField(${i},'lineWidth',parseFloat(this.value))"></label>
+        <label class="adv-checkbox"><input type="checkbox" ${cfg.dashed?'checked':''} onchange="advSetDsField(${i},'dashed',this.checked)" style="margin-right:6px;"> Čárkovaná čára</label>
+      </div>
+    </div>`;
+  }).join('');
+
+  const rawLegendItems=getVisibleLegendItems(st.dsIdxList, st.mode==='all');
+  if(!st.legend) st.legend={};
+  const legendRowsHtml=rawLegendItems.map(it=>{
+    const key=String(it.datasetIndex);
+    if(!st.legend[key]) st.legend[key]={text:it.text, tex:false, hidden:false};
+    const cfg=st.legend[key];
+    return `
+    <div class="adv-ds-row">
+      <div class="adv-ds-name" style="display:flex;align-items:center;justify-content:space-between;gap:6px;">
+        <span style="opacity:.6;font-weight:400;font-size:11px;">${escapeXml(it.text)}</span>
+        <label class="adv-checkbox" style="margin:0;flex-shrink:0;"><input type="checkbox" ${cfg.hidden?'checked':''} onchange="advSetField('legend:${key}','hidden',this.checked)" style="margin-right:4px;"> skrýt</label>
+      </div>
+      <div class="adv-ds-grid">
+        ${advTextFieldControl('legend:'+key, cfg, 'Text položky')}
+        <label class="adv-checkbox"><input type="checkbox" ${cfg.tex?'checked':''} onchange="advToggleTex('legend:${key}',this.checked)" style="margin-right:6px;"> TeX režim</label>
+      </div>
+    </div>`;
+  }).join('') || '<div class="adv-hint">V grafu nejsou žádné viditelné položky legendy.</div>';
+
+  panel.innerHTML=`
+    <div class="adv-section">
+      <div class="adv-section-title">Záhlaví</div>
+      <label class="adv-checkbox"><input type="checkbox" ${st.title.show?'checked':''} onchange="advSetField('title','show',this.checked)" style="margin-right:6px;"> Zobrazit záhlaví</label>
+      ${advTextFieldControl('title', st.title, 'Text záhlaví')}
+      <label>Velikost písma<input type="range" min="10" max="40" value="${st.title.fontSize}" oninput="advSetField('title','fontSize',parseFloat(this.value))"></label>
+      <label class="adv-checkbox"><input type="checkbox" ${st.title.tex?'checked':''} onchange="advToggleTex('title',this.checked)" style="margin-right:6px;"> TeX režim</label>
+    </div>
+    <div class="adv-section">
+      <div class="adv-section-title">Popisek osy X</div>
+      ${advTextFieldControl('xLabel', st.xLabel, 'Text osy X')}
+      <label>Velikost písma<input type="range" min="8" max="26" value="${st.xLabel.fontSize}" oninput="advSetField('xLabel','fontSize',parseFloat(this.value))"></label>
+      <label class="adv-checkbox"><input type="checkbox" ${st.xLabel.tex?'checked':''} onchange="advToggleTex('xLabel',this.checked)" style="margin-right:6px;"> TeX režim</label>
+      ${advAlignButtonsHtml('xLabel', st.xLabel)}
+    </div>
+    <div class="adv-section">
+      <div class="adv-section-title">Popisek osy Y</div>
+      ${advTextFieldControl('yLabel', st.yLabel, 'Text osy Y')}
+      <label>Velikost písma<input type="range" min="8" max="26" value="${st.yLabel.fontSize}" oninput="advSetField('yLabel','fontSize',parseFloat(this.value))"></label>
+      <label class="adv-checkbox"><input type="checkbox" ${st.yLabel.tex?'checked':''} onchange="advToggleTex('yLabel',this.checked)" style="margin-right:6px;"> TeX režim</label>
+      ${advAlignButtonsHtml('yLabel', st.yLabel)}
+    </div>
+    <div class="adv-section">
+      <div class="adv-section-title">Osy a legenda</div>
+      <label>Čísla na osách<input type="range" min="8" max="18" value="${st.tickFontSize}" oninput="advSetTop('tickFontSize',parseFloat(this.value))"></label>
+      <label>Písmo legendy<input type="range" min="8" max="18" value="${st.legendFontSize}" oninput="advSetTop('legendFontSize',parseFloat(this.value))"></label>
+      <label>Barva pozadí<input type="color" value="${st.bgColor}" oninput="advSetTop('bgColor',this.value)"></label>
+      ${(()=>{
+        const xr=advResolveAxisRange('x'), yr=advResolveAxisRange('y');
+        const fmt=v=>Number(v.toPrecision(6));
+        return `
+        <div class="adv-hint" style="margin-top:8px;margin-bottom:2px;">Rozsah os (prázdné = automaticky podle grafu)</div>
+        <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px;">
+          <label style="font-size:11px;">X od<input type="number" step="any" value="${fmt(xr.min)}" oninput="advSetRangeField('x','min',this.value)"></label>
+          <label style="font-size:11px;">X do<input type="number" step="any" value="${fmt(xr.max)}" oninput="advSetRangeField('x','max',this.value)"></label>
+          <label style="font-size:11px;">Y od<input type="number" step="any" value="${fmt(yr.min)}" oninput="advSetRangeField('y','min',this.value)"></label>
+          <label style="font-size:11px;">Y do<input type="number" step="any" value="${fmt(yr.max)}" oninput="advSetRangeField('y','max',this.value)"></label>
+        </div>
+        <button type="button" onclick="advResetRanges()"
+          style="width:100%;margin-top:6px;background:transparent;border:1px dashed var(--border);color:var(--text-muted);
+                 border-radius:6px;padding:5px 8px;cursor:pointer;font-family:'Sora',sans-serif;font-size:11px;">
+          ↺ Resetovat rozsah os
+        </button>
+        <div id="adv-range-warning">${advRangeWarningHtml()}</div>`;
+      })()}
+    </div>
+    <div class="adv-section">
+      <div class="adv-section-title">Položky legendy</div>
+      ${legendRowsHtml}
+    </div>
+    <div class="adv-section">
+      <div class="adv-section-title">Sady dat</div>
+      ${dsRowsHtml}
+    </div>
+    <div class="adv-hint">Tip: text záhlaví a popisky os lze v náhledu vlevo přetáhnout přímo myší.</div>
+  `;
+}
+
+// Text (i \emph{}/\textbf{}/textove symboly) resime VLASTNIM parserem a
+// vykreslujeme jako normalni HTML pres <foreignObject> (prohlizec umi
+// libovolnou diakritiku/unicode bezchybne) — pres KaTeX posilame JEN to, co
+// je uvnitr $...$, protoze tam KaTeX dava skutecnou pridanou hodnotu
+// (zlomky, exponenty, symboly jako \AA/\S apod).
+const TEX_TEXT_SYMBOLS={
+  '\\AA':'Å','\\aa':'å','\\ss':'ß','\\O':'Ø','\\o':'ø','\\L':'Ł','\\l':'ł',
+  '\\S':'§','\\P':'¶','\\dag':'†','\\ddag':'‡','\\copyright':'©','\\pounds':'£',
+  '\\ldots':'…','\\dots':'…','\\slash':'/',
+  '\\%':'%','\\&':'&','\\#':'#','\\_':'_','\\$':'$','\\{':'{','\\}':'}',
+  '\\ ':' ','\\,':' ','\\;':' ','\\quad':'  ','\\qquad':'    '
+};
+
+// Miniaturni parser LaTeXoveho "textoveho modu" - rozseka vstup na behy
+// {text, italic, bold, math}. Podporuje \emph{}/\textit{}/\textbf{}, stare
+// \bf/\it/\rm uvnitr {} skupiny, prepnuti do matematiky pres $...$ a bezne
+// textove symboly (\AA, \S, \% ...). Neznamy prikaz se radsi vypise jako
+// citelny text, nez aby appka spadla na chybu.
+function parseTexRuns(raw){
+  const runs=[];
+  function pushText(str, style){ if(str) runs.push({text:str, italic:!!style.italic, bold:!!style.bold, math:false}); }
+  function parse(str, style){
+    let j=0, buf='';
+    while(j<str.length){
+      const ch=str[j];
+      if(ch==='$'){
+        const end=str.indexOf('$', j+1);
+        if(end<0){ buf+=ch; j++; continue; }
+        pushText(buf, style); buf='';
+        runs.push({text:str.slice(j+1,end), italic:false, bold:false, math:true});
+        j=end+1; continue;
+      }
+      if(ch==='\\'){
+        const m=str.slice(j).match(/^\\([a-zA-Z]+)/);
+        if(m){
+          const cmd=m[1];
+          let k=j+1+cmd.length;
+          while(str[k]===' ') k++;
+          if(str[k]==='{'){
+            let depth=1, e=k+1;
+            while(e<str.length && depth>0){ if(str[e]==='{') depth++; else if(str[e]==='}') depth--; e++; }
+            const inner=str.slice(k+1,e-1);
+            pushText(buf, style); buf='';
+            if(cmd==='emph'||cmd==='textit'||cmd==='it') parse(inner, {italic:true, bold:style.bold});
+            else if(cmd==='textbf'||cmd==='bf') parse(inner, {italic:style.italic, bold:true});
+            else parse(inner, style);
+            j=e; continue;
+          }
+          const token='\\'+cmd;
+          if(TEX_TEXT_SYMBOLS[token]!==undefined){ buf+=TEX_TEXT_SYMBOLS[token]; j=k; continue; }
+          if(cmd==='bf'){ style={italic:style.italic,bold:true}; j=k; continue; }
+          if(cmd==='it'||cmd==='sl'){ style={italic:true,bold:style.bold}; j=k; continue; }
+          if(cmd==='rm'||cmd==='normalfont'||cmd==='upshape'){ style={italic:false,bold:false}; j=k; continue; }
+          buf+=cmd; j=k; continue;
+        } else {
+          const token=str.slice(j,j+2);
+          if(TEX_TEXT_SYMBOLS[token]!==undefined){ buf+=TEX_TEXT_SYMBOLS[token]; j+=2; continue; }
+          buf+=str[j+1]||''; j+=2; continue;
+        }
+      }
+      if(ch==='{'){
+        let depth=1, e=j+1;
+        while(e<str.length && depth>0){ if(str[e]==='{') depth++; else if(str[e]==='}') depth--; e++; }
+        pushText(buf, style); buf='';
+        parse(str.slice(j+1,e-1), {italic:style.italic, bold:style.bold});
+        j=e; continue;
+      }
+      if(ch==='}'){ j++; continue; }
+      buf+=ch; j++;
+    }
+    pushText(buf, style);
+  }
+  parse(raw||'', {italic:false, bold:false});
+  return runs;
+}
+
+// Zmeri skutecnou sirku textu pres skryty SVG <text> - spolehlivejsi nez
+// odhad podle poctu znaku, funguje pro libovolny font-style/font-weight.
+let _advTextMeasureSvg=null;
+function advMeasureTextWidth(text, fontSizePx, italic, bold){
+  if(!text) return 0;
+  const svgNS='http://www.w3.org/2000/svg';
+  if(!_advTextMeasureSvg){
+    _advTextMeasureSvg=document.createElementNS(svgNS,'svg');
+    _advTextMeasureSvg.style.cssText='position:absolute;visibility:hidden;width:0;height:0;overflow:hidden;';
+    document.body.appendChild(_advTextMeasureSvg);
+  }
+  const t=document.createElementNS(svgNS,'text');
+  t.setAttribute('font-size', fontSizePx);
+  t.setAttribute('font-family',"'Sora',sans-serif");
+  if(italic) t.setAttribute('font-style','italic');
+  if(bold) t.setAttribute('font-weight','700');
+  t.textContent=text;
+  _advTextMeasureSvg.appendChild(t);
+  let w=0;
+  try{ w=t.getComputedTextLength(); }catch(e){ w=text.length*fontSizePx*0.55; }
+  _advTextMeasureSvg.removeChild(t);
+  return w;
+}
+
+// Vytáhne z načtených stylesheetů veškerá pravidla odpovídající danému
+// regexu (třídy i vložené @font-face s base64 fonty) — potřeba jen pro
+// samostatně stažené SVG, které nemá přístup ke stylesheetu stránky.
+// Výsledky se cachují podle vzoru, protože stylesheet se za běhu nemění.
+const _inlineCssCache={};
+function getInlineCssMatching(cacheKey, testRe){
+  if(_inlineCssCache[cacheKey]!==undefined) return _inlineCssCache[cacheKey];
+  let css='';
+  try{
+    for(const sheet of document.styleSheets){
+      let rules;
+      try{ rules=sheet.cssRules||sheet.rules; }catch(e){ continue; }
+      if(!rules) continue;
+      for(const rule of rules){
+        const txt=rule.cssText||'';
+        if(testRe.test(txt)) css+=txt+'\n';
+      }
+    }
+  }catch(e){ /* i bez toho se zbytek SVG vykresli spravne */ }
+  _inlineCssCache[cacheKey]=css;
+  return css;
+}
+function getKatexInlineCss(){
+  return getInlineCssMatching('katex', /katex/i);
+}
+// Sora + Fira Code jsou self-hostované přímo ve style.css (base64 @font-face),
+// takže export může vzít stejná @font-face pravidla, co používá živá stránka —
+// exportované SVG pak vypadá naprosto stejně jako náhled, i otevřené offline.
+function getAppFontsInlineCss(){
+  return getInlineCssMatching('appfonts', /@font-face[^}]*font-family:\s*['"]?(Sora|Fira Code)/i);
+}
+
+// Zmeri skutecnou vykreslenou velikost kusu HTML (pouzivano pro foreignObject
+// box v exportovanem SVG) pres skryty DOM element.
+let _advHtmlMeasureDiv=null;
+function advMeasureHtmlBox(html, fontSizePx){
+  if(!_advHtmlMeasureDiv){
+    _advHtmlMeasureDiv=document.createElement('div');
+    _advHtmlMeasureDiv.style.cssText='position:absolute;visibility:hidden;left:-99999px;top:-99999px;white-space:nowrap;pointer-events:none;';
+    document.body.appendChild(_advHtmlMeasureDiv);
+  }
+  _advHtmlMeasureDiv.style.fontSize=fontSizePx+'px';
+  _advHtmlMeasureDiv.style.fontFamily="'Sora',sans-serif";
+  _advHtmlMeasureDiv.style.lineHeight='1.25';
+  _advHtmlMeasureDiv.innerHTML=html || '&nbsp;';
+  const r=_advHtmlMeasureDiv.getBoundingClientRect();
+  return {width:r.width, height:r.height};
+}
+
+// Poskladá behy z parseTexRuns do jednoho HTML retezce - textove behy jako
+// obycejny (pripadne <b>/<i>) text, matematicke behy pres skutecny KaTeX
+// (katex.renderToString), ktery ma mnohem sirsi a spolehlivejsi pokryti
+// prikazu/symbolu/akcentu nez rucni aproximace.
+function texRunsToHtml(runs){
+  return runs.map(r=>{
+    if(r.math){
+      try{ return katex.renderToString(r.text, {throwOnError:false, displayMode:false, strict:false, output:'html'}); }
+      catch(e){ return `<span style="color:#c83030;">$${escapeXml(r.text)}$</span>`; }
+    }
+    const html=escapeXml(r.text);
+    if(r.bold && r.italic) return `<b><i>${html}</i></b>`;
+    if(r.bold) return `<b>${html}</b>`;
+    if(r.italic) return `<i>${html}</i>`;
+    return html;
+  }).join('');
+}
+
+// Vrati HTML pro libovolny TeX text popisku:
+//  * cely text obaleny v $$...$$ = jedna samostatna display rovnice (KaTeX)
+//  * cely text obaleny v jednom paru $...$ = jedna samostatna inline rovnice (KaTeX)
+//  * cokoliv jineho = smiseny text/matematika podle parseTexRuns (bezne
+//    LaTeXove chovani - text vzprimeny, \emph{}/\textbf{} funguji, $...$
+//    prepina do matematiky)
+function buildLabelHtml(rawText){
+  const raw=rawText||'';
+  const trimmed=raw.trim();
+  try{
+    if(trimmed.startsWith('$$') && trimmed.endsWith('$$') && trimmed.length>=4){
+      return katex.renderToString(trimmed.slice(2,-2).trim(), {throwOnError:false, displayMode:true, strict:false, output:'html'});
+    }
+    if(trimmed.startsWith('$') && trimmed.endsWith('$') && trimmed.length>=2 && !trimmed.slice(1,-1).includes('$')){
+      return katex.renderToString(trimmed.slice(1,-1).trim(), {throwOnError:false, displayMode:false, strict:false, output:'html'});
+    }
+  }catch(e){ /* spadni na obecny parser nize */ }
+  return texRunsToHtml(parseTexRuns(raw));
+}
+
+// Vykresli popisek bud jako obycejny <text>, nebo (je-li zapnuty TeX mod)
+// jako <foreignObject> se skutecnym HTML/KaTeX obsahem z buildLabelHtml -
+// obojí obalene v <g data-adv-key> kvuli pretahovani mysi v nahledu.
+function advTextEl(cfg, x, y, anchor, color, extraStyle, keyId){
+  extraStyle=extraStyle||'';
+  if(cfg.tex && (cfg.text||'').trim()){
+    try{
+      const html=buildLabelHtml(cfg.text);
+      const box=advMeasureHtmlBox(html, cfg.fontSize);
+      // Malá rezerva navíc — jiný prohlížeč/nástroj může mít nepatrně jiné
+      // metriky fontu, radši necháme trochu prostoru navíc než aby se text ořízl.
+      const w=Math.max(1,Math.ceil(box.width*1.08))+8, h=Math.max(1,Math.ceil(box.height*1.1))+6;
+      let fx=x;
+      if(anchor==='middle') fx=x-w/2;
+      else if(anchor==='end') fx=x-w;
+      const fy=y-h*0.78;
+      return `<g data-adv-key="${keyId}"><foreignObject x="${fx.toFixed(1)}" y="${fy.toFixed(1)}" width="${w}" height="${h}" overflow="visible"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:'Sora',sans-serif;font-size:${cfg.fontSize}px;line-height:1.25;color:${color};white-space:nowrap;overflow:visible;${extraStyle}">${html}</div></foreignObject></g>`;
+    }catch(e){ /* spadni na obycejny text */ }
+  }
+  return `<g data-adv-key="${keyId}"><text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" font-size="${cfg.fontSize}" fill="${color}" style="${extraStyle}">${escapeXml(cfg.text||'')}</text></g>`;
+}
+
+function advAxesAndGrid(ml, mt, pw, ph, xMin, xMax, yMin, yMax, tickFontSize, plotBg){
+  let svg='';
+  svg+=`<rect x="${ml}" y="${mt}" width="${pw}" height="${ph}" fill="${plotBg}"/>`;
+  const xRange=xMax-xMin||1, yRange=yMax-yMin||1;
+  for(let i=0;i<=5;i++){
+    const gy=mt+i*ph/5, gx=ml+i*pw/5;
+    svg+=`<line x1="${ml}" y1="${gy}" x2="${ml+pw}" y2="${gy}" stroke="rgba(0,0,0,0.07)" stroke-width="1"/>`;
+    svg+=`<line x1="${gx}" y1="${mt}" x2="${gx}" y2="${mt+ph}" stroke="rgba(0,0,0,0.07)" stroke-width="1"/>`;
+    const yVal=(yMin+((5-i)/5)*yRange).toPrecision(4);
+    const xVal=(xMin+(i/5)*xRange).toPrecision(4);
+    svg+=`<text x="${ml-6}" y="${gy+4}" text-anchor="end" font-size="${tickFontSize}" fill="#444456" font-family="'Fira Code',monospace">${yVal}</text>`;
+    svg+=`<text x="${gx}" y="${mt+ph+16}" text-anchor="middle" font-size="${tickFontSize}" fill="#444456" font-family="'Fira Code',monospace">${xVal}</text>`;
+  }
+  svg+=`<line x1="${ml}" y1="${mt}" x2="${ml}" y2="${mt+ph}" stroke="#cccccc" stroke-width="1.5"/>`;
+  svg+=`<line x1="${ml}" y1="${mt+ph}" x2="${ml+pw}" y2="${mt+ph}" stroke="#cccccc" stroke-width="1.5"/>`;
+  return svg;
+}
+
+// Vezme surové položky z getVisibleLegendItems a aplikuje na ně uživatelské
+// úpravy z advExportState.legend (přepsaný text, TeX režim, skrytí) — klíčuje
+// se podle datasetIndex z živého grafu, což je v rámci otevřeného průvodce stálé.
+function advResolveLegendItems(rawItems){
+  if(!advExportState) return [];
+  if(!advExportState.legend) advExportState.legend={};
+  return rawItems.map(it=>{
+    const key=String(it.datasetIndex);
+    if(!advExportState.legend[key]) advExportState.legend[key]={text:it.text, tex:false, hidden:false};
+    const cfg=advExportState.legend[key];
+    if(cfg.hidden) return null;
+    return {key, text:cfg.text, tex:cfg.tex, fillStyle:it.fillStyle, strokeStyle:it.strokeStyle, lineWidth:it.lineWidth, pointStyle:it.pointStyle, rotation:it.rotation};
+  }).filter(Boolean);
+}
+
+// Vrátí vykreslenou "značku" položky legendy (obyčejný text nebo TeX SVG)
+// a její skutečnou šířku — díky tomu se řádky legendy lámou správně i s TeXem.
+function advLegendItemGlyph(item, fontSize){
+  if(item.tex && (item.text||'').trim()){
+    try{
+      const html=buildLabelHtml(item.text);
+      const box=advMeasureHtmlBox(html, fontSize);
+      if(box.width>0){
+        const w=Math.ceil(box.width*1.08)+8, h=Math.ceil(box.height*1.1)+6;
+        return {width:w, render:(x,y)=>`<foreignObject x="${x.toFixed(1)}" y="${(y-h/2).toFixed(1)}" width="${w}" height="${h}" overflow="visible"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:'Sora',sans-serif;font-size:${fontSize}px;line-height:1.25;color:#444456;white-space:nowrap;overflow:visible;">${html}</div></foreignObject>`};
+      }
+    }catch(e){ /* spadni na obyčejný text */ }
+  }
+  const width=advMeasureTextWidth(item.text, fontSize, false, false);
+  return {width, render:(x,y)=>`<text x="${x.toFixed(1)}" y="${(y+4).toFixed(1)}" font-size="${fontSize}" fill="#444456">${escapeXml(item.text)}</text>`};
+}
+
+function advLayoutLegendRows(items, availW, legendFontSize){
+  const rows=[]; let curRow=[], curW=0;
+  items.forEach(item=>{
+    const glyph=advLegendItemGlyph(item, legendFontSize);
+    const w=24+glyph.width+16;
+    if(curRow.length && curW+w>availW){ rows.push(curRow); curRow=[]; curW=0; }
+    curRow.push({item, glyph, w}); curW+=w;
+  });
+  if(curRow.length) rows.push(curRow);
+  return rows;
+}
+function advLegendRows(rows, W, legendFontSize){
+  const rowH=legendFontSize+9;
+  let svg='';
+  rows.forEach((row,ri)=>{
+    const rowWidth=row.reduce((s,r)=>s+r.w,0);
+    let lx=(W-rowWidth)/2;
+    const ly=16+ri*rowH;
+    row.forEach(r=>{
+      const it=r.item;
+      const fill=it.fillStyle||'transparent', stroke=it.strokeStyle||'#444456', lw=it.lineWidth||1.5;
+      svg+=svgChartPointShape(it.pointStyle, it.rotation, lx+7, ly, 5, fill, stroke, lw);
+      svg+=r.glyph.render(lx+24, ly);
+      lx+=r.w;
+    });
+  });
+  return svg;
+}
+
+function buildAdvExportSvg(forExport){
+  const st=advExportState;
+  if(!st || !chartInst) return '';
+  const activeDatasetsList=st.dsIdxList.map(i=>({ds:datasets[i], i}));
+  const {min:xMin,max:xMax}=advResolveAxisRange('x');
+  const {min:yMin,max:yMax}=advResolveAxisRange('y');
+  const rawLegendItems=getVisibleLegendItems(st.dsIdxList, st.mode==='all');
+  const legendItems=advResolveLegendItems(rawLegendItems);
+
+  const W=900, H=600, ml=70, mr=30, mb=70;
+  const legendRows=advLayoutLegendRows(legendItems, W-40, st.legendFontSize);
+  const legendH=legendRows.length ? 10+legendRows.length*(st.legendFontSize+9) : 0;
+  const titleH=st.title.show ? st.title.fontSize+16 : 0;
+  const mt=16+titleH+legendH+8;
+  const pw=W-ml-mr, ph=H-mt-mb;
+
+  const px=v=>ml+(v-xMin)/(xMax-xMin||1)*pw;
+  const py=v=>mt+ph-(v-yMin)/(yMax-yMin||1)*ph;
+
+  // Samostatně stažené SVG (forExport) nemá přístup ke stylesheetu stránky,
+  // takže si musí Sora/Fira Code (vč. base64 fontů) nést rovnou v sobě, jinak
+  // by se po otevření mimo appku zobrazily jiným (fallback) písmem. KaTeX CSS
+  // se přidává navíc jen tehdy, když je někde skutečně zapnutý TeX režim.
+  const anyTex=(st.title.show && st.title.tex) || st.xLabel.tex || st.yLabel.tex || legendItems.some(it=>it.tex);
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="'Sora',sans-serif">`;
+  if(forExport){
+    const fontsCss=getAppFontsInlineCss();
+    if(fontsCss) svg+=`<defs><style>${fontsCss}</style></defs>`;
+    if(anyTex){
+      const katexCss=getKatexInlineCss();
+      if(katexCss) svg+=`<defs><style>${katexCss}</style></defs>`;
+    }
+  }
+  svg+=`<rect width="${W}" height="${H}" fill="${st.bgColor}"/>`;
+
+  if(st.title.show){
+    svg+=advTextEl(st.title, W/2+st.title.dx, 14+st.title.fontSize*0.78+st.title.dy, 'middle', '#222222', 'font-weight:700;', 'title');
+  }
+  svg+=`<g transform="translate(0,${titleH})">${advLegendRows(legendRows, W, st.legendFontSize)}</g>`;
+  svg+=advAxesAndGrid(ml,mt,pw,ph,xMin,xMax,yMin,yMax, st.tickFontSize, st.bgColor==='#ffffff' ? '#fafafa' : st.bgColor);
+
+  // "Zarovnat na okraj" posune základní pozici k pravému/hornímu konci osy
+  // místo vystředění podél celé osy — dx/dy z přetažení myší se počítá navíc.
+  const xLabelBaseX = st.xLabel.align==='edge' ? (ml+pw-40) : (ml+pw/2);
+  svg+=advTextEl(st.xLabel, xLabelBaseX+st.xLabel.dx, H-12+st.xLabel.dy, 'middle', '#444456', '', 'xlabel');
+  const ylCx=16+st.yLabel.dx, ylCyBase = st.yLabel.align==='edge' ? (mt+30) : (mt+ph/2);
+  const ylCy=ylCyBase+st.yLabel.dy;
+  svg+=`<g transform="rotate(-90,${ylCx.toFixed(1)},${ylCy.toFixed(1)})">${advTextEl(st.yLabel, ylCx, ylCy, 'middle', '#444456', '', 'ylabel')}</g>`;
+
+  // Přesahy z panelu Nástroje (kombinace/integrál/derivace) patří jen do
+  // exportu "uložit vše" — u samostatného grafu má zůstat jen jeho vlastní funkce.
+  if(st.mode==='all') svg+=svgIntegralArea(px,py,ml,mt,pw,ph);
+
+  activeDatasetsList.forEach(({ds,i})=>{
+    const cfg=st.datasets[i];
+    const {x,y,excl,lastResult:result}=ds;
+    const findVis=kind=>{
+      const idx=chartInst.data.datasets.findIndex(d=>d._dsIdx===i && d._kind===kind);
+      return idx<0 ? true : chartInst.isDatasetVisible(idx);
+    };
+    const dataVisible=x.length>0 && findVis('data');
+    const exclVisible=excl.length>0 && findVis('excl');
+    const fitVisible=findVis('fit');
+    const ciItemVisible=findVis('ci');
+
+    let xSmooth=null, ySmooth=null, ci=null;
+    if(result && x.length>0){
+      const xsMin=Math.min(...x), xsMax=Math.max(...x);
+      const step=(xsMax-xsMin)/399||1;
+      xSmooth=Array.from({length:400},(_,k)=>xsMin+k*step);
+      try{ ySmooth=xSmooth.map(result.smooth); }catch(e){ ySmooth=xSmooth.map(()=>NaN); }
+      const dsUseCI=(i===activeDatasetIdx)?showCI:ds.showCI;
+      ci=buildCiBand(result,x,y,xSmooth,ySmooth, dsUseCI && ciItemVisible);
+    }
+
+    const baseCol=DATASET_COLORS[i%DATASET_COLORS.length];
+    const col={point:cfg.pointColor, fit:cfg.lineColor, ciBorder:baseCol.ciBorder, ciBg:baseCol.ciBg, excl:cfg.pointColor};
+
+    if(ci){
+      const clip=p=>[Math.max(ml,Math.min(ml+pw,px(p.x))), Math.max(mt,Math.min(mt+ph,py(p.y)))];
+      const uPts=ci.upper.filter(p=>isFinite(p.y)).map(clip);
+      const lPts=ci.lower.filter(p=>isFinite(p.y)).map(clip).reverse();
+      if(uPts.length>1){
+        const poly=[...uPts,...lPts].map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+        svg+=`<polygon points="${poly}" fill="${col.ciBg}"/>`;
+        const du=uPts.map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+        const dl=lPts.slice().reverse().map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
+        svg+=`<path d="${du}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
+        svg+=`<path d="${dl}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
+      }
+    }
+    if(fitVisible && xSmooth){
+      const pts=xSmooth.map((xi,k)=>[xi,ySmooth[k]]).filter(p=>isFinite(p[1]));
+      if(pts.length){
+        const d=pts.map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
+        const dash=cfg.dashed?' stroke-dasharray="7,4"':'';
+        svg+=`<path d="${d}" fill="none" stroke="${col.fit}" stroke-width="${cfg.lineWidth}" stroke-linecap="round" stroke-linejoin="round"${dash}/>`;
+      }
+    }
+    if(dataVisible){
+      x.forEach((xi,k)=>{ svg+=svgShape(cfg.pointStyle, px(xi), py(y[k]), cfg.pointSize, col.point, 'rgba(0,0,0,0.25)', 1.5); });
+    }
+    if(exclVisible){
+      excl.forEach(([xi,yi])=>{ svg+=svgShape(cfg.pointStyle, px(xi), py(yi), cfg.pointSize, 'none', col.excl, 2); });
+    }
+  });
+
+  if(st.mode==='all'){
+    svg+=svgCombinedCurve(px,py);
+    svg+=svgDerivativeTangent(px,py);
+  }
+  svg+='</svg>';
+
+  if(forExport) svg=svg.replace(/\s*data-adv-key="[^"]*"/g,'');
+  return svg;
+}
+
+function renderAdvExportPreview(){
+  const container=document.getElementById('adv-export-preview');
+  if(!container || !advExportState) return;
+  container.innerHTML=buildAdvExportSvg(false);
+  persistAdvExportPrefs();
+}
+
+function svgPointFromEvent(svgEl, evt){
+  const pt=svgEl.createSVGPoint();
+  pt.x=evt.clientX; pt.y=evt.clientY;
+  const ctm=svgEl.getScreenCTM();
+  if(!ctm) return {x:0,y:0};
+  const loc=pt.matrixTransform(ctm.inverse());
+  return {x:loc.x, y:loc.y};
+}
+function advKeyToStateField(key){
+  if(!advExportState) return null;
+  if(key==='title') return advExportState.title;
+  if(key==='xlabel') return advExportState.xLabel;
+  if(key==='ylabel') return advExportState.yLabel;
+  return null;
+}
+function advExportOnPointerDown(e){
+  const container=document.getElementById('adv-export-preview');
+  const el=e.target.closest('[data-adv-key]');
+  if(!el || !advExportState || !container) return;
+  const field=advKeyToStateField(el.getAttribute('data-adv-key'));
+  if(!field) return;
+  const svgEl=container.querySelector('svg');
+  if(!svgEl) return;
+  e.preventDefault();
+  const start=svgPointFromEvent(svgEl, e);
+  advDragCtx={field, startX:start.x, startY:start.y, startDx:field.dx, startDy:field.dy};
+  window.addEventListener('pointermove', advExportOnPointerMove);
+  window.addEventListener('pointerup', advExportOnPointerUp);
+}
+function advExportOnPointerMove(e){
+  if(!advDragCtx) return;
+  const container=document.getElementById('adv-export-preview');
+  const svgEl=container && container.querySelector('svg');
+  if(!svgEl) return;
+  const cur=svgPointFromEvent(svgEl, e);
+  advDragCtx.field.dx=advDragCtx.startDx+(cur.x-advDragCtx.startX);
+  advDragCtx.field.dy=advDragCtx.startDy+(cur.y-advDragCtx.startY);
+  renderAdvExportPreview();
+}
+function advExportOnPointerUp(){
+  advDragCtx=null;
+  window.removeEventListener('pointermove', advExportOnPointerMove);
+  window.removeEventListener('pointerup', advExportOnPointerUp);
+}
+let advDragHandlersInit=false;
+function initAdvExportDragHandlers(){
+  if(advDragHandlersInit) return;
+  advDragHandlersInit=true;
+  const container=document.getElementById('adv-export-preview');
+  if(container) container.addEventListener('pointerdown', advExportOnPointerDown);
+}
+
+function saveAdvancedExportSvg(){
+  if(!advExportState) return;
+  const svg=buildAdvExportSvg(true);
+  const a=document.createElement('a');
+  a.href='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+  a.download=advExportState.mode==='all' ? 'regrese_vsechna_data_pokrocile.svg' : 'regrese_pokrocile.svg';
   a.click();
 }
 
