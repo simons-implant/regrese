@@ -1224,6 +1224,11 @@ function computeRegression(){
   let result;
   try{
     result=computeFitForType(x,y,type,ds);
+    // Numericky singulární data (např. všechny x stejné) můžou z fitů vyjít
+    // jako NaN/Infinity — radši srozumitelná hláška než "NaN" v parametrech.
+    if(result && Array.isArray(result.yp) && result.yp.length && !result.yp.some(Number.isFinite)){
+      throw new Error('Regresi se z těchto dat nepodařilo spočítat (data jsou numericky singulární — zkontroluj, že hodnoty x nejsou všechny stejné).');
+    }
     if(type==='fourier'){
       ds.fourierHarmonics=fourierHarmonics;
       const slider=document.getElementById('fourier-harmonics-slider');
@@ -2411,8 +2416,12 @@ function parseAndFill(text){
   function splitLine(line){
     if(line.includes('\t'))  return line.split('\t').map(s=>s.trim());
     if(line.includes(';'))   return line.split(';').map(s=>s.trim());
+    // Mezery mají přednost před čárkou: v "1,5 2,3" je čárka desetinný
+    // oddělovač (české zvyklosti), ne oddělovač sloupců — dělit podle čárky
+    // by data potichu rozbilo. Čárkou se dělí jen řádek bez mezer ("1.5,2.3").
+    if(/\s/.test(line))      return line.split(/\s+/).filter(s=>s!=='');
     if(line.includes(','))   return line.split(',').map(s=>s.trim());
-    return line.split(/\s+/).filter(s=>s!=='');
+    return [line];
   }
 
   let headerX='x', headerY='y', dataStart=0;
@@ -3126,7 +3135,13 @@ function openAdvancedExportWizard(mode){
     : [{ds:datasets[activeDatasetIdx], i:activeDatasetIdx}];
 
   advExportState=buildDefaultAdvExportState(mode, activeDatasetsList);
-  applyAdvExportPrefs(advExportState, loadAdvExportPrefs());
+  // Poškozené/zastaralé uložené preference nesmí průvodce trvale rozbít —
+  // při jakékoli chybě se zahodí a jede se z čistých výchozích hodnot.
+  try{ applyAdvExportPrefs(advExportState, loadAdvExportPrefs()); }
+  catch(e){
+    clearAdvExportPrefs();
+    advExportState=buildDefaultAdvExportState(mode, activeDatasetsList);
+  }
   advPreviewZoom=1;
   // Zahodit vyrovnávací paměť vytažených CSS stylů (fonty/KaTeX) při každém
   // otevření průvodce — kdyby se jednou při startu appky vytáhla neúplně
@@ -4165,6 +4180,16 @@ function closeResiduals(){
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeNavod(); });
 
+// Escape zavírá i Pokročilý průvodce exportem (nejdřív vnořený TeX editor,
+// pak samotný průvodce) — stejné chování jako klik mimo okno.
+document.addEventListener('keydown', e => {
+  if(e.key!=='Escape') return;
+  const texOv=document.getElementById('adv-tex-overlay');
+  if(texOv && texOv.style.display==='flex'){ closeAdvTexEditor(); return; }
+  const expOv=document.getElementById('adv-export-overlay');
+  if(expOv && expOv.style.display==='flex') closeAdvancedExportWizard();
+});
+
 async function loadNavod() {
   const el = document.getElementById('navod-content');
   try {
@@ -4228,8 +4253,11 @@ document.addEventListener('keydown', e => { if(e.key==='Escape') closeAdv(); });
 function advSplitLine(line){
   if(line.includes('\t')) return line.split('\t').map(s=>s.trim());
   if(line.includes(';'))  return line.split(';').map(s=>s.trim());
+  // Stejná logika jako splitLine v parseAndFill: u řádku s mezerami je čárka
+  // s největší pravděpodobností desetinný oddělovač, ne oddělovač sloupců.
+  if(/\s/.test(line))     return line.split(/\s+/).filter(s=>s!=='');
   if(line.includes(','))  return line.split(',').map(s=>s.trim());
-  return line.split(/\s+/).filter(s=>s!=='');
+  return [line];
 }
 
 function advParse(text){
