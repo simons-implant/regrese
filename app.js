@@ -68,6 +68,19 @@ function escapeXml(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// Stažení SVG přes Blob místo data: URI — data URI má v prohlížečích limit
+// na délku (a s vloženými base64 fonty se k němu export snadno přiblíží),
+// Blob funguje pro libovolnou velikost.
+function downloadSvgFile(svg, filename){
+  const blob=new Blob([svg], {type:'image/svg+xml;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=filename;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(url), 5000);
+}
+
 // Sdílená SVG ikonka pro chybové/varovné hlášky (nahrazuje dřívější emoji ⚠/❗,
 // které se v tmavém režimu vykreslovaly nekonzistentně — currentColor se
 // naopak vždy napojí na barvu okolního textu v obou motivech).
@@ -2861,10 +2874,7 @@ function saveGraphSVG(){
 
   svg+=`</svg>`;
 
-  const a=document.createElement('a');
-  a.href='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
-  a.download='regrese.svg';
-  a.click();
+  downloadSvgFile(svg, 'regrese.svg');
 }
 
 function saveGraphAllSVG(){
@@ -2956,10 +2966,7 @@ function saveGraphAllSVG(){
 
   svg+=`</svg>`;
 
-  const a=document.createElement('a');
-  a.href='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
-  a.download='regrese_vsechna_data.svg';
-  a.click();
+  downloadSvgFile(svg, 'regrese_vsechna_data.svg');
 }
 
 /* ══════════════════════════════════════════════
@@ -3120,6 +3127,12 @@ function openAdvancedExportWizard(mode){
 
   advExportState=buildDefaultAdvExportState(mode, activeDatasetsList);
   applyAdvExportPrefs(advExportState, loadAdvExportPrefs());
+  advPreviewZoom=1;
+  // Zahodit vyrovnávací paměť vytažených CSS stylů (fonty/KaTeX) při každém
+  // otevření průvodce — kdyby se jednou při startu appky vytáhla neúplně
+  // (např. kvůli načasování), zůstala by špatná hodnota nacachovaná napořád.
+  _katexFullCssCache=null;
+  for(const k in _inlineCssCache) delete _inlineCssCache[k];
 
   document.getElementById('adv-export-overlay').style.display='flex';
   document.body.style.overflow='hidden';
@@ -3397,9 +3410,13 @@ const TEX_TEXT_SYMBOLS={
 // \bf/\it/\rm uvnitr {} skupiny, prepnuti do matematiky pres $...$ a bezne
 // textove symboly (\AA, \S, \% ...). Neznamy prikaz se radsi vypise jako
 // citelny text, nez aby appka spadla na chybu.
+const TEX_BLANK_STYLE={italic:false, bold:false, mono:false, smallcaps:false, underline:false};
 function parseTexRuns(raw){
   const runs=[];
-  function pushText(str, style){ if(str) runs.push({text:str, italic:!!style.italic, bold:!!style.bold, math:false}); }
+  function pushText(str, style){
+    if(str) runs.push({text:str, italic:!!style.italic, bold:!!style.bold, mono:!!style.mono,
+      smallcaps:!!style.smallcaps, underline:!!style.underline, math:false});
+  }
   function parse(str, style){
     let j=0, buf='';
     while(j<str.length){
@@ -3408,7 +3425,7 @@ function parseTexRuns(raw){
         const end=str.indexOf('$', j+1);
         if(end<0){ buf+=ch; j++; continue; }
         pushText(buf, style); buf='';
-        runs.push({text:str.slice(j+1,end), italic:false, bold:false, math:true});
+        runs.push({text:str.slice(j+1,end), italic:false, bold:false, mono:false, smallcaps:false, underline:false, math:true});
         j=end+1; continue;
       }
       if(ch==='\\'){
@@ -3422,16 +3439,23 @@ function parseTexRuns(raw){
             while(e<str.length && depth>0){ if(str[e]==='{') depth++; else if(str[e]==='}') depth--; e++; }
             const inner=str.slice(k+1,e-1);
             pushText(buf, style); buf='';
-            if(cmd==='emph'||cmd==='textit'||cmd==='it') parse(inner, {italic:true, bold:style.bold});
-            else if(cmd==='textbf'||cmd==='bf') parse(inner, {italic:style.italic, bold:true});
+            if(cmd==='emph'||cmd==='textit'||cmd==='it') parse(inner, {...style, italic:true});
+            else if(cmd==='textbf'||cmd==='bf') parse(inner, {...style, bold:true});
+            else if(cmd==='texttt'||cmd==='ttfamily') parse(inner, {...style, mono:true});
+            else if(cmd==='textsc'||cmd==='scshape') parse(inner, {...style, smallcaps:true});
+            else if(cmd==='underline'||cmd==='uline') parse(inner, {...style, underline:true});
+            else if(cmd==='textrm'||cmd==='rmfamily'||cmd==='textup'||cmd==='upshape') parse(inner, {...style, italic:false});
+            else if(cmd==='textnormal'||cmd==='textsf'||cmd==='sffamily') parse(inner, style);
             else parse(inner, style);
             j=e; continue;
           }
           const token='\\'+cmd;
           if(TEX_TEXT_SYMBOLS[token]!==undefined){ buf+=TEX_TEXT_SYMBOLS[token]; j=k; continue; }
-          if(cmd==='bf'){ style={italic:style.italic,bold:true}; j=k; continue; }
-          if(cmd==='it'||cmd==='sl'){ style={italic:true,bold:style.bold}; j=k; continue; }
-          if(cmd==='rm'||cmd==='normalfont'||cmd==='upshape'){ style={italic:false,bold:false}; j=k; continue; }
+          if(cmd==='bf'){ style={...style,bold:true}; j=k; continue; }
+          if(cmd==='it'||cmd==='sl'){ style={...style,italic:true}; j=k; continue; }
+          if(cmd==='tt'){ style={...style,mono:true}; j=k; continue; }
+          if(cmd==='sc'){ style={...style,smallcaps:true}; j=k; continue; }
+          if(cmd==='rm'||cmd==='normalfont'||cmd==='upshape'){ style={...TEX_BLANK_STYLE}; j=k; continue; }
           buf+=cmd; j=k; continue;
         } else {
           const token=str.slice(j,j+2);
@@ -3443,7 +3467,7 @@ function parseTexRuns(raw){
         let depth=1, e=j+1;
         while(e<str.length && depth>0){ if(str[e]==='{') depth++; else if(str[e]==='}') depth--; e++; }
         pushText(buf, style); buf='';
-        parse(str.slice(j+1,e-1), {italic:style.italic, bold:style.bold});
+        parse(str.slice(j+1,e-1), {...style});
         j=e; continue;
       }
       if(ch==='}'){ j++; continue; }
@@ -3451,7 +3475,7 @@ function parseTexRuns(raw){
     }
     pushText(buf, style);
   }
-  parse(raw||'', {italic:false, bold:false});
+  parse(raw||'', {...TEX_BLANK_STYLE});
   return runs;
 }
 
@@ -3501,13 +3525,45 @@ function getInlineCssMatching(cacheKey, testRe){
   _inlineCssCache[cacheKey]=css;
   return css;
 }
+// SKUTEČNÁ příčina dřívějšího "ošklivého fontu" v exportu: CSS pro export se
+// tahalo za běhu z document.styleSheets, jenže když je appka otevřená přímo
+// ze souboru (file://), prohlížeč přístup k pravidlům style.css zablokuje
+// (SecurityError) — tichý catch pak vrátil prázdný řetězec a stažené SVG
+// zůstalo úplně bez KaTeX tříd i bez fontů (Sora, Fira Code, KaTeX_*).
+// Náhled přitom vypadal správně, protože ten je součástí stránky a styly na
+// něj dopadají normálně. Proto teď primární zdroj CSS je window.__STYLE_CSS_TEXT__
+// (kopie style.css nesená v style-embed.js jako <script> — ta se načte vždy,
+// file:// i web) a document.styleSheets zůstává jen jako záloha.
+let _katexFullCssCache=null;
 function getKatexInlineCss(){
-  return getInlineCssMatching('katex', /katex/i);
+  if(typeof window.__STYLE_CSS_TEXT__==='string' && window.__STYLE_CSS_TEXT__.includes('.katex')){
+    return window.__STYLE_CSS_TEXT__;
+  }
+  if(_katexFullCssCache!==null) return _katexFullCssCache;
+  let css='';
+  try{
+    for(const sheet of document.styleSheets){
+      let rules;
+      try{ rules=sheet.cssRules||sheet.rules; }catch(e){ continue; }
+      if(!rules) continue;
+      for(const rule of rules){ css+=(rule.cssText||'')+'\n'; }
+    }
+  }catch(e){ /* i bez toho se zbytek SVG vykresli spravne */ }
+  if(!css.includes('.katex')) console.warn('Export SVG: KaTeX CSS se nepodařilo získat — TeX popisky budou ve staženém souboru vypadat jinak než v náhledu.');
+  _katexFullCssCache=css;
+  return css;
 }
-// Sora + Fira Code jsou self-hostované přímo ve style.css (base64 @font-face),
-// takže export může vzít stejná @font-face pravidla, co používá živá stránka —
-// exportované SVG pak vypadá naprosto stejně jako náhled, i otevřené offline.
+// Sora + Fira Code jsou self-hostované přímo ve style.css (base64 @font-face) —
+// export vytáhne příslušná @font-face pravidla z window.__STYLE_CSS_TEXT__
+// (spolehlivé i na file://, viz komentář u getKatexInlineCss), případně
+// záložně z document.styleSheets.
 function getAppFontsInlineCss(){
+  const src=window.__STYLE_CSS_TEXT__;
+  if(typeof src==='string' && src.length){
+    const faces=(src.match(/@font-face\{[^}]*\}/g)||[])
+      .filter(f=>/font-family:\s*['"]?(Sora|Fira Code)/i.test(f));
+    if(faces.length) return faces.join('\n');
+  }
   return getInlineCssMatching('appfonts', /@font-face[^}]*font-family:\s*['"]?(Sora|Fira Code)/i);
 }
 
@@ -3538,10 +3594,13 @@ function texRunsToHtml(runs){
       try{ return katex.renderToString(r.text, {throwOnError:false, displayMode:false, strict:false, output:'html'}); }
       catch(e){ return `<span style="color:#c83030;">$${escapeXml(r.text)}$</span>`; }
     }
-    const html=escapeXml(r.text);
-    if(r.bold && r.italic) return `<b><i>${html}</i></b>`;
-    if(r.bold) return `<b>${html}</b>`;
-    if(r.italic) return `<i>${html}</i>`;
+    let html=escapeXml(r.text);
+    if(r.mono) html=`<span style="font-family:'Fira Code',monospace;">${html}</span>`;
+    if(r.smallcaps) html=`<span style="font-variant-caps:small-caps;">${html}</span>`;
+    if(r.underline) html=`<u>${html}</u>`;
+    if(r.bold && r.italic) html=`<b><i>${html}</i></b>`;
+    else if(r.bold) html=`<b>${html}</b>`;
+    else if(r.italic) html=`<i>${html}</i>`;
     return html;
   }).join('');
 }
@@ -3575,14 +3634,20 @@ function advTextEl(cfg, x, y, anchor, color, extraStyle, keyId){
     try{
       const html=buildLabelHtml(cfg.text);
       const box=advMeasureHtmlBox(html, cfg.fontSize);
-      // Malá rezerva navíc — jiný prohlížeč/nástroj může mít nepatrně jiné
-      // metriky fontu, radši necháme trochu prostoru navíc než aby se text ořízl.
-      const w=Math.max(1,Math.ceil(box.width*1.08))+8, h=Math.max(1,Math.ceil(box.height*1.1))+6;
+      // Rezerva navíc jen na šířku (jiný prohlížeč/nástroj může mít nepatrně
+      // jiné metriky fontu) — výšku NEnafukujeme, box je nahoře zarovnaný,
+      // takže by to jen posunulo text nahoru mimo zamýšlenou pozici.
+      const w=Math.max(1,Math.ceil(box.width*1.08))+8, h=Math.max(1,Math.ceil(box.height))+4;
       let fx=x;
       if(anchor==='middle') fx=x-w/2;
       else if(anchor==='end') fx=x-w;
       const fy=y-h*0.78;
-      return `<g data-adv-key="${keyId}"><foreignObject x="${fx.toFixed(1)}" y="${fy.toFixed(1)}" width="${w}" height="${h}" overflow="visible"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:'Sora',sans-serif;font-size:${cfg.fontSize}px;line-height:1.25;color:${color};white-space:nowrap;overflow:visible;${extraStyle}">${html}</div></foreignObject></g>`;
+      const fo=`<foreignObject x="${fx.toFixed(1)}" y="${fy.toFixed(1)}" width="${w}" height="${h}" overflow="visible" requiredExtensions="http://www.w3.org/1999/xhtml"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:'Sora',sans-serif;font-size:${cfg.fontSize}px;line-height:1.25;color:${color};white-space:nowrap;overflow:visible;${extraStyle}">${html}</div></foreignObject>`;
+      // <switch> — nástroje/prohlížeče bez podpory foreignObject (Word,
+      // PowerPoint, některé náhledy souborů…) automaticky spadnou na obyčejný
+      // <text> s nevykresleným TeX zdrojem, místo aby popisek úplně zmizel.
+      const fallback=`<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" font-size="${cfg.fontSize}" fill="${color}" style="${extraStyle}">${escapeXml(cfg.text||'')}</text>`;
+      return `<g data-adv-key="${keyId}"><switch>${fo}${fallback}</switch></g>`;
     }catch(e){ /* spadni na obycejny text */ }
   }
   return `<g data-adv-key="${keyId}"><text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" font-size="${cfg.fontSize}" fill="${color}" style="${extraStyle}">${escapeXml(cfg.text||'')}</text></g>`;
@@ -3612,12 +3677,36 @@ function advAxesAndGrid(ml, mt, pw, ph, xMin, xMax, yMin, yMax, tickFontSize, pl
 function advResolveLegendItems(rawItems){
   if(!advExportState) return [];
   if(!advExportState.legend) advExportState.legend={};
+  const st=advExportState;
   return rawItems.map(it=>{
     const key=String(it.datasetIndex);
-    if(!advExportState.legend[key]) advExportState.legend[key]={text:it.text, tex:false, hidden:false};
-    const cfg=advExportState.legend[key];
+    if(!st.legend[key]) st.legend[key]={text:it.text, tex:false, hidden:false};
+    const cfg=st.legend[key];
     if(cfg.hidden) return null;
-    return {key, text:cfg.text, tex:cfg.tex, fillStyle:it.fillStyle, strokeStyle:it.strokeStyle, lineWidth:it.lineWidth, pointStyle:it.pointStyle, rotation:it.rotation};
+
+    // Značka v legendě musí vypadat PŘESNĚ jako to, co se skutečně kreslí do
+    // grafu (viz buildAdvExportSvg) — ne jako živý graf, jehož barvy/styl bodů
+    // uživatel v panelu "Sady dat" mohl v průvodci přepsat.
+    let fillStyle=it.fillStyle, strokeStyle=it.strokeStyle, lineWidth=it.lineWidth,
+        pointStyle=it.pointStyle, rotation=it.rotation;
+    const chartDs=chartInst && chartInst.data.datasets[it.datasetIndex];
+    const dsIdx=chartDs ? chartDs._dsIdx : undefined;
+    const kind=chartDs ? chartDs._kind : undefined;
+    const dcfg=(dsIdx!==undefined && st.datasets) ? st.datasets[dsIdx] : null;
+    if(dcfg){
+      if(kind==='data'){
+        const meta=getPointStyleMeta(dcfg.pointStyle);
+        fillStyle=dcfg.pointColor; strokeStyle='rgba(0,0,0,0.25)'; lineWidth=1.5;
+        pointStyle=meta.chart; rotation=meta.rotation;
+      } else if(kind==='excl'){
+        const meta=getPointStyleMeta(dcfg.pointStyle);
+        fillStyle='none'; strokeStyle=dcfg.pointColor; lineWidth=2;
+        pointStyle=meta.chart; rotation=meta.rotation;
+      } else if(kind==='fit'){
+        strokeStyle=dcfg.lineColor; lineWidth=dcfg.lineWidth;
+      }
+    }
+    return {key, text:cfg.text, tex:cfg.tex, fillStyle, strokeStyle, lineWidth, pointStyle, rotation};
   }).filter(Boolean);
 }
 
@@ -3630,7 +3719,21 @@ function advLegendItemGlyph(item, fontSize){
       const box=advMeasureHtmlBox(html, fontSize);
       if(box.width>0){
         const w=Math.ceil(box.width*1.08)+8, h=Math.ceil(box.height*1.1)+6;
-        return {width:w, render:(x,y)=>`<foreignObject x="${x.toFixed(1)}" y="${(y-h/2).toFixed(1)}" width="${w}" height="${h}" overflow="visible"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:'Sora',sans-serif;font-size:${fontSize}px;line-height:1.25;color:#444456;white-space:nowrap;overflow:visible;">${html}</div></foreignObject>`};
+        // display:flex;align-items:center — díky tomu box vertikálně centrovaný
+        // na y (tj. na stejné výšce jako značka) zůstane přesně vystředěný i s
+        // rezervou navíc na výšku (jinak by top-aligned obsah vizuálně "vyjel" nahoru).
+        // POZOR: obsah (html) musí být zabalený v JEDNOM vnitřním <span>, ne
+        // vložený přímo jako děti flex kontejneru — flexbox dělá z KAŽDÉHO
+        // přímého potomka (i anonymního boxu kolem "Data 3 " textového uzlu)
+        // samostatnou flex položku a mezera na konci takového odděleného
+        // textového uzlu se před sousední <span> (KaTeX) ořízne jako "konec
+        // řádku" → proto mizela mezera mezi textem a matematikou v legendě.
+        // <switch> — nástroje bez podpory foreignObject spadnou na prostý text.
+        return {width:w, render:(x,y)=>{
+          const fo=`<foreignObject x="${x.toFixed(1)}" y="${(y-h/2).toFixed(1)}" width="${w}" height="${h}" overflow="visible" requiredExtensions="http://www.w3.org/1999/xhtml"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:'Sora',sans-serif;font-size:${fontSize}px;line-height:1.25;color:#444456;white-space:nowrap;overflow:visible;display:flex;align-items:center;height:100%;"><span>${html}</span></div></foreignObject>`;
+          const fallback=`<text x="${x.toFixed(1)}" y="${(y+4).toFixed(1)}" font-size="${fontSize}" fill="#444456">${escapeXml(item.text)}</text>`;
+          return `<switch>${fo}${fallback}</switch>`;
+        }};
       }
     }catch(e){ /* spadni na obyčejný text */ }
   }
@@ -3686,39 +3789,33 @@ function buildAdvExportSvg(forExport){
   const px=v=>ml+(v-xMin)/(xMax-xMin||1)*pw;
   const py=v=>mt+ph-(v-yMin)/(yMax-yMin||1)*ph;
 
-  // Samostatně stažené SVG (forExport) nemá přístup ke stylesheetu stránky,
-  // takže si musí Sora/Fira Code (vč. base64 fontů) nést rovnou v sobě, jinak
-  // by se po otevření mimo appku zobrazily jiným (fallback) písmem. KaTeX CSS
-  // se přidává navíc jen tehdy, když je někde skutečně zapnutý TeX režim.
-  const anyTex=(st.title.show && st.title.tex) || st.xLabel.tex || st.yLabel.tex || legendItems.some(it=>it.tex);
-  let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="'Sora',sans-serif">`;
-  if(forExport){
-    const fontsCss=getAppFontsInlineCss();
-    if(fontsCss) svg+=`<defs><style>${fontsCss}</style></defs>`;
-    if(anyTex){
-      const katexCss=getKatexInlineCss();
-      if(katexCss) svg+=`<defs><style>${katexCss}</style></defs>`;
-    }
-  }
-  svg+=`<rect width="${W}" height="${H}" fill="${st.bgColor}"/>`;
+  // Kolem "těsného" grafu (W×H) je při editaci velkorysý pracovní okraj PAD,
+  // aby šlo nadpis/popisky odtáhnout myší i mimo původní hranice grafu bez
+  // toho, aby se rovnou oříznuly. Při skutečném uložení (forExport) se pak
+  // podle toho, kam uživatel věci reálně umístil, automaticky domaže zpět
+  // (viz advAutoCropSvg) — takže výsledný soubor těsně obepíná jen to, co je
+  // v něm doopravdy vidět, žádný zbytečně velký prázdný okraj.
+  const PAD=150;
+  const outerW=W+2*PAD, outerH=H+2*PAD;
 
+  let inner='';
   if(st.title.show){
-    svg+=advTextEl(st.title, W/2+st.title.dx, 14+st.title.fontSize*0.78+st.title.dy, 'middle', '#222222', 'font-weight:700;', 'title');
+    inner+=advTextEl(st.title, W/2+st.title.dx, 14+st.title.fontSize*0.78+st.title.dy, 'middle', '#222222', 'font-weight:700;', 'title');
   }
-  svg+=`<g transform="translate(0,${titleH})">${advLegendRows(legendRows, W, st.legendFontSize)}</g>`;
-  svg+=advAxesAndGrid(ml,mt,pw,ph,xMin,xMax,yMin,yMax, st.tickFontSize, st.bgColor==='#ffffff' ? '#fafafa' : st.bgColor);
+  inner+=`<g transform="translate(0,${titleH})">${advLegendRows(legendRows, W, st.legendFontSize)}</g>`;
+  inner+=advAxesAndGrid(ml,mt,pw,ph,xMin,xMax,yMin,yMax, st.tickFontSize, st.bgColor==='#ffffff' ? '#fafafa' : st.bgColor);
 
   // "Zarovnat na okraj" posune základní pozici k pravému/hornímu konci osy
   // místo vystředění podél celé osy — dx/dy z přetažení myší se počítá navíc.
   const xLabelBaseX = st.xLabel.align==='edge' ? (ml+pw-40) : (ml+pw/2);
-  svg+=advTextEl(st.xLabel, xLabelBaseX+st.xLabel.dx, H-12+st.xLabel.dy, 'middle', '#444456', '', 'xlabel');
+  inner+=advTextEl(st.xLabel, xLabelBaseX+st.xLabel.dx, H-12+st.xLabel.dy, 'middle', '#444456', '', 'xlabel');
   const ylCx=16+st.yLabel.dx, ylCyBase = st.yLabel.align==='edge' ? (mt+30) : (mt+ph/2);
   const ylCy=ylCyBase+st.yLabel.dy;
-  svg+=`<g transform="rotate(-90,${ylCx.toFixed(1)},${ylCy.toFixed(1)})">${advTextEl(st.yLabel, ylCx, ylCy, 'middle', '#444456', '', 'ylabel')}</g>`;
+  inner+=`<g transform="rotate(-90,${ylCx.toFixed(1)},${ylCy.toFixed(1)})">${advTextEl(st.yLabel, ylCx, ylCy, 'middle', '#444456', '', 'ylabel')}</g>`;
 
   // Přesahy z panelu Nástroje (kombinace/integrál/derivace) patří jen do
   // exportu "uložit vše" — u samostatného grafu má zůstat jen jeho vlastní funkce.
-  if(st.mode==='all') svg+=svgIntegralArea(px,py,ml,mt,pw,ph);
+  if(st.mode==='all') inner+=svgIntegralArea(px,py,ml,mt,pw,ph);
 
   activeDatasetsList.forEach(({ds,i})=>{
     const cfg=st.datasets[i];
@@ -3751,11 +3848,11 @@ function buildAdvExportSvg(forExport){
       const lPts=ci.lower.filter(p=>isFinite(p.y)).map(clip).reverse();
       if(uPts.length>1){
         const poly=[...uPts,...lPts].map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-        svg+=`<polygon points="${poly}" fill="${col.ciBg}"/>`;
+        inner+=`<polygon points="${poly}" fill="${col.ciBg}"/>`;
         const du=uPts.map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
         const dl=lPts.slice().reverse().map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-        svg+=`<path d="${du}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
-        svg+=`<path d="${dl}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
+        inner+=`<path d="${du}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
+        inner+=`<path d="${dl}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
       }
     }
     if(fitVisible && xSmooth){
@@ -3763,32 +3860,110 @@ function buildAdvExportSvg(forExport){
       if(pts.length){
         const d=pts.map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
         const dash=cfg.dashed?' stroke-dasharray="7,4"':'';
-        svg+=`<path d="${d}" fill="none" stroke="${col.fit}" stroke-width="${cfg.lineWidth}" stroke-linecap="round" stroke-linejoin="round"${dash}/>`;
+        inner+=`<path d="${d}" fill="none" stroke="${col.fit}" stroke-width="${cfg.lineWidth}" stroke-linecap="round" stroke-linejoin="round"${dash}/>`;
       }
     }
     if(dataVisible){
-      x.forEach((xi,k)=>{ svg+=svgShape(cfg.pointStyle, px(xi), py(y[k]), cfg.pointSize, col.point, 'rgba(0,0,0,0.25)', 1.5); });
+      x.forEach((xi,k)=>{ inner+=svgShape(cfg.pointStyle, px(xi), py(y[k]), cfg.pointSize, col.point, 'rgba(0,0,0,0.25)', 1.5); });
     }
     if(exclVisible){
-      excl.forEach(([xi,yi])=>{ svg+=svgShape(cfg.pointStyle, px(xi), py(yi), cfg.pointSize, 'none', col.excl, 2); });
+      excl.forEach(([xi,yi])=>{ inner+=svgShape(cfg.pointStyle, px(xi), py(yi), cfg.pointSize, 'none', col.excl, 2); });
     }
   });
 
   if(st.mode==='all'){
-    svg+=svgCombinedCurve(px,py);
-    svg+=svgDerivativeTangent(px,py);
+    inner+=svgCombinedCurve(px,py);
+    inner+=svgDerivativeTangent(px,py);
   }
+
+  // Samostatně stažené SVG (forExport) nemá přístup ke stylesheetu stránky,
+  // takže si musí Sora/Fira Code (vč. base64 fontů) nést rovnou v sobě, jinak
+  // by se po otevření mimo appku zobrazily jiným (fallback) písmem. KaTeX CSS
+  // se přidává navíc jen tehdy, když je někde skutečně zapnutý TeX režim.
+  const anyTex=(st.title.show && st.title.tex) || st.xLabel.tex || st.yLabel.tex || legendItems.some(it=>it.tex);
+  let svg=`<svg xmlns="http://www.w3.org/2000/svg" width="${outerW}" height="${outerH}" viewBox="0 0 ${outerW} ${outerH}" font-family="'Sora',sans-serif">`;
+  if(forExport){
+    // <style> je přímo pod <svg> (ne zabalený v <defs>) a obsah je v CDATA —
+    // CSS tak nemůže rozbít XML validitu souboru, ať obsahuje cokoliv.
+    // Při zapnutém TeXu se vkládá celý style.css (obsahuje i Sora/Fira Code
+    // fonty), takže samostatný blok s fonty by byl jen duplicitně.
+    const wrapCss=css=>`<style><![CDATA[\n${css.replace(/\]\]>/g,'')}\n]]></style>`;
+    if(anyTex){
+      const katexCss=getKatexInlineCss();
+      if(katexCss) svg+=wrapCss(katexCss);
+      else { const f=getAppFontsInlineCss(); if(f) svg+=wrapCss(f); }
+    } else {
+      const fontsCss=getAppFontsInlineCss();
+      if(fontsCss) svg+=wrapCss(fontsCss);
+    }
+  }
+  // Pozadí kryje CELOU pracovní plochu (vč. okraje pro přetahování) hned od
+  // začátku, ať po ořezu na skutečně použitou oblast nikde nechybí barva.
+  svg+=`<rect width="${outerW}" height="${outerH}" fill="${st.bgColor}"/>`;
+  svg+=`<g data-adv-content="1" transform="translate(${PAD},${PAD})">${inner}</g>`;
   svg+='</svg>';
 
-  if(forExport) svg=svg.replace(/\s*data-adv-key="[^"]*"/g,'');
+  if(forExport){
+    svg=svg.replace(/\s*data-adv-key="[^"]*"/g,'');
+    svg=advAutoCropSvg(svg, PAD);
+  }
   return svg;
+}
+
+// Po vygenerování exportního SVG (forExport=true) změří skutečný rozsah
+// vykresleného obsahu (přes getBBox živého náhledu v DOMu — je vždy aktuální,
+// protože se překresluje po každé změně) a přepíše viewBox/width/height tak,
+// aby těsně obepínal jen to, co je doopravdy vidět (title/popisky mohly být
+// odtažené mimo původní "těsné" hranice grafu) — plus malý finální okraj.
+// Při jakémkoli selhání se radši vrátí neořízlé SVG, než aby export spadl.
+function advAutoCropSvg(svgString, pad){
+  try{
+    const previewSvg=document.querySelector('#adv-export-preview svg');
+    const contentG=previewSvg && previewSvg.querySelector('g[data-adv-content]');
+    if(!contentG || typeof contentG.getBBox!=='function') return svgString;
+    const bbox=contentG.getBBox();
+    if(!bbox || !isFinite(bbox.width) || !isFinite(bbox.height) || bbox.width<=0 || bbox.height<=0) return svgString;
+    const FINAL_PAD=14;
+    const vx=Math.floor(bbox.x+pad-FINAL_PAD), vy=Math.floor(bbox.y+pad-FINAL_PAD);
+    const vw=Math.ceil(bbox.width+2*FINAL_PAD), vh=Math.ceil(bbox.height+2*FINAL_PAD);
+    return svgString.replace(/width="[^"]*" height="[^"]*" viewBox="[^"]*"/, `width="${vw}" height="${vh}" viewBox="${vx} ${vy} ${vw} ${vh}"`);
+  }catch(e){ return svgString; }
 }
 
 function renderAdvExportPreview(){
   const container=document.getElementById('adv-export-preview');
   if(!container || !advExportState) return;
   container.innerHTML=buildAdvExportSvg(false);
+  advApplyPreviewZoom();
   persistAdvExportPrefs();
+}
+
+// Zoom náhledu v Pokročilém průvodci exportem — čistě zobrazovací věc (jak
+// moc velký je náhled na obrazovce), vůbec neovlivňuje uložený soubor. Náhled
+// má okolo grafu velkorysý pracovní okraj pro přetahování (viz PAD v
+// buildAdvExportSvg), takže na 100 % je logicky o něco "oddálenější" než graf
+// samotný — přiblížením si můžeš při přetahování popisků pomoct na přesnost.
+let advPreviewZoom=1;
+function advApplyPreviewZoom(){
+  const svgEl=document.querySelector('#adv-export-preview svg');
+  if(!svgEl) return;
+  const baseWidth=900; // stejná výchozí šířka náhledu jako dřív (bez pracovního okraje)
+  svgEl.style.width=Math.round(baseWidth*advPreviewZoom)+'px';
+  svgEl.style.height='auto';
+  svgEl.style.maxWidth='none';
+  svgEl.style.display='block';
+  const label=document.getElementById('adv-preview-zoom-label');
+  if(label) label.textContent=Math.round(advPreviewZoom*100)+'%';
+}
+function advSetPreviewZoom(newZoom){
+  advPreviewZoom=Math.max(0.4, Math.min(3, newZoom));
+  advApplyPreviewZoom();
+}
+function advZoomPreviewBy(factor){
+  advSetPreviewZoom(advPreviewZoom*factor);
+}
+function advResetPreviewZoom(){
+  advSetPreviewZoom(1);
 }
 
 function svgPointFromEvent(svgEl, evt){
@@ -3846,10 +4021,7 @@ function initAdvExportDragHandlers(){
 function saveAdvancedExportSvg(){
   if(!advExportState) return;
   const svg=buildAdvExportSvg(true);
-  const a=document.createElement('a');
-  a.href='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
-  a.download=advExportState.mode==='all' ? 'regrese_vsechna_data_pokrocile.svg' : 'regrese_pokrocile.svg';
-  a.click();
+  downloadSvgFile(svg, advExportState.mode==='all' ? 'regrese_vsechna_data_pokrocile.svg' : 'regrese_pokrocile.svg');
 }
 
 /* ══════════════════════════════════════════════

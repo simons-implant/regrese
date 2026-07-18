@@ -11,6 +11,10 @@
 <script src="https://cdn.jsdelivr.net/npm/mathjs@12.4.3/lib/browser/math.js"></script>
 <script src="chart.min.js"></script>
 <link rel="stylesheet" href="style.css">
+<!-- Kopie style.css jako JS retezec: jediny spolehlivy zdroj CSS pro vkladani
+     do exportovaneho SVG. Cteni pres document.styleSheets selze (SecurityError),
+     kdyz je appka otevrena primo ze souboru (file://) - script se nacte vzdy. -->
+<script src="style-embed.js"></script>
 <script src="katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
 <script data-goatcounter="https://simons.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
@@ -591,7 +595,7 @@ td input.cell:focus{
 <body>
 <div class="app">
   <header class="topbar" id="topBar">
-    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.5.9</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím. Aplikace používá anonymní analytiku návštěvnosti (GoatCounter) bez cookies a osobních údajů.</span></div></div>
+    <div class="app-title"><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' style='width:22px;height:22px;vertical-align:middle;margin-right:7px;'><rect width='32' height='32' rx='7' fill='%23c83030'/><polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/><circle cx='10' cy='18' r='2' fill='white'/><circle cx='16' cy='20' r='2' fill='white'/><circle cx='22' cy='10' r='2' fill='white'/><line x1='4' x2='28' y1='28' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/><line x1='4' x2='4' y1='4' y2='28' stroke='white' stroke-width='1.5' opacity='0.4'/></svg><div style="display:inline-flex;flex-direction:column;vertical-align:middle;line-height:1.2;"><span>Regresní analýza <span style="font-size:11px;font-weight:400;color:var(--text-muted);">v2.5.15</span></span><span style="font-size:10px;font-weight:400;color:var(--text-muted);letter-spacing:.04em;">© Šimon Svoboda</span><span style="font-size:9px;font-weight:400;color:var(--text-muted);letter-spacing:.02em;opacity:.75;">Nástroj pro studijní a orientační účely. Výsledky si vždy ověřte. Autor neručí za správnost výpočtů ani za škody vzniklé jejich použitím. Aplikace používá anonymní analytiku návštěvnosti (GoatCounter) bez cookies a osobních údajů.</span></div></div>
     <div class="spacer"></div>
     <button onclick="openNavod()"
       title="Návod k použití"
@@ -1126,8 +1130,16 @@ td input.cell:focus{
       Nadpis a popisky os lze v náhledu přetáhnout myší. Změny se ukládají až po stisku „Uložit SVG“.
     </div>
     <div style="display:flex;flex:1;min-height:0;overflow:hidden;">
-      <div id="adv-export-preview-wrap" style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;padding:18px;overflow:auto;background:var(--surface2);">
-        <div id="adv-export-preview" style="width:100%;max-width:900px;"></div>
+      <div id="adv-export-preview-wrap" style="flex:1;min-width:0;display:flex;align-items:center;justify-content:center;padding:18px;overflow:auto;background:var(--surface2);position:relative;">
+        <div style="position:absolute;top:10px;right:10px;z-index:5;display:flex;align-items:center;gap:2px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:3px;box-shadow:0 2px 8px rgba(0,0,0,.12);">
+          <button type="button" onclick="advZoomPreviewBy(0.8)" title="Oddálit"
+            style="width:24px;height:24px;background:transparent;border:none;color:var(--text);cursor:pointer;font-size:15px;line-height:1;border-radius:5px;">−</button>
+          <span id="adv-preview-zoom-label" onclick="advResetPreviewZoom()" title="Kliknutím obnovíš 100 %"
+            style="width:44px;text-align:center;font-size:11px;color:var(--text-muted);font-family:'Fira Code',monospace;cursor:pointer;">100%</span>
+          <button type="button" onclick="advZoomPreviewBy(1.25)" title="Přiblížit"
+            style="width:24px;height:24px;background:transparent;border:none;color:var(--text);cursor:pointer;font-size:15px;line-height:1;border-radius:5px;">+</button>
+        </div>
+        <div id="adv-export-preview"></div>
       </div>
       <div id="adv-export-panel" class="adv-export-panel"
         style="width:300px;flex-shrink:0;border-left:1px solid var(--border);overflow-y:auto;overflow-x:hidden;box-sizing:border-box;padding:14px;display:flex;flex-direction:column;gap:14px;"></div>
@@ -1163,7 +1175,7 @@ td input.cell:focus{
     </div>
     <div style="padding:16px 20px;overflow-y:auto;">
       <div style="font-size:12px;color:var(--text-muted);margin-bottom:8px;line-height:1.5;font-family:'Sora',sans-serif;">
-        Piš jako v běžném LaTeX dokumentu — obyčejný text zůstává vzpřímený, uvnitř funguje <code>\emph{šikmo}</code>, <code>\textbf{tučně}</code> apod. a matematiku (proměnné, vzorce) vlož mezi <code>$...$</code> (inline) — např. <code>Teplota \emph{T} v $\,^{\circ}$C</code>. Když chceš, aby byl <em>celý</em> popisek jedna centrovaná rovnice, obal ho celý do <code>$$...$$</code>. Pozor: textové symboly jako <code>\AA</code>, <code>\S</code>, <code>\ss</code> patří stejně jako v LaTeXu <em>mimo</em> <code>$...$</code> (jsou to znaky textu, ne matematika) — <code>$\AA$</code> proto spadne na chybu, zatímco obyčejné <code>\AA</code> funguje.
+        Piš jako v běžném LaTeX dokumentu — obyčejný text zůstává vzpřímený, uvnitř funguje <code>\emph{šikmo}</code>, <code>\textbf{tučně}</code>, <code>\texttt{strojopis}</code>, <code>\textsc{kapitálky}</code>, <code>\underline{podtržení}</code> apod. a matematiku (proměnné, vzorce) vlož mezi <code>$...$</code> (inline) — např. <code>Teplota \emph{T} v $\,^{\circ}$C</code>. Když chceš, aby byl <em>celý</em> popisek jedna centrovaná rovnice, obal ho celý do <code>$$...$$</code>. Pozor: textové symboly jako <code>\AA</code>, <code>\S</code>, <code>\ss</code> patří stejně jako v LaTeXu <em>mimo</em> <code>$...$</code> (jsou to znaky textu, ne matematika) — <code>$\AA$</code> proto spadne na chybu, zatímco obyčejné <code>\AA</code> funguje.
       </div>
       <textarea id="adv-tex-input" rows="3" oninput="updateAdvTexPreview()" placeholder="např. $$\frac{a}{b} = c_i^2$$"
         style="width:100%;box-sizing:border-box;background:var(--btn);color:var(--text);border:1px solid var(--border);
