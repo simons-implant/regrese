@@ -32,6 +32,27 @@ const DATASET_COLORS = [
   {point:'#e05c8a', fit:'#c02a5f', ciBorder:'rgba(192,42,95,0.45)',  ciBg:'rgba(192,42,95,0.16)',  excl:'#e05c8a'}
 ];
 
+// Vrátí barvu (hex nebo už existující rgba řetězec) se zadanou průhledností —
+// používá se k "zesvětlení" sad dat v grafu, které nejsou právě zvýrazněné
+// (viz highlightedDsIdx). Funguje jednotně pro hex i rgba vstupy.
+function colorWithAlpha(color, alpha){
+  if(typeof color!=='string') return color;
+  if(color==='transparent'||color==='none') return color;
+  if(color.startsWith('#')){
+    const hex=color.slice(1);
+    const full=hex.length===3 ? hex.split('').map(c=>c+c).join('') : hex;
+    const r=parseInt(full.slice(0,2),16), g=parseInt(full.slice(2,4),16), b=parseInt(full.slice(4,6),16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  const m=color.match(/rgba?\(([^)]+)\)/);
+  if(m){
+    const parts=m[1].split(',').map(s=>s.trim());
+    const origA=parts.length>3 ? parseFloat(parts[3]) : 1;
+    return `rgba(${parts[0]},${parts[1]},${parts[2]},${(origA*alpha).toFixed(3)})`;
+  }
+  return color;
+}
+
 /* ── Typy bodů pro jednotlivé datasety ── */
 const POINT_STYLES = [
   {key:'circle',       label:'Kruh',                   icon:'●', chart:'circle',   rotation:0,   sizeMult:1},
@@ -56,7 +77,13 @@ function makeEmptyDataset(name){
     fourierManualPeriodOn:false, fourierManualPeriod:null,
     hiddenSeries:{data:false, excl:false, fit:false, ci:false},
     customFormula:null, pointStyle:'circle',
-    lastResult:null, x:[], y:[], excl:[]
+    // Nejistoty jednotlivých bodů (sigma_y) — pro vážený fit (WLS) a χ²/dof.
+    // Sloupec σy v tabulce (a ovládání abs/% + hromadné vyplnění) se zobrazí
+    // až po zapnutí přepínače sigmaYOn — v základním stavu je tabulka stejná
+    // jako předtím. sigmaYMode: 'abs' (absolutní, ve stejné jednotce jako y)
+    // nebo 'pct' (procento z |y| daného bodu — odpovídá datasheetům přístrojů).
+    sigmaYOn:false, sigmaYMode:'abs',
+    lastResult:null, x:[], y:[], excl:[], sy:[]
   };
 }
 
@@ -101,14 +128,44 @@ function captureTableRows(){
     const cb=row.cells[1].querySelector('input[type="checkbox"]');
     const xInput=row.cells[2].querySelector('input');
     const yInput=row.cells[3].querySelector('input');
-    rows.push({x:xInput?xInput.value:'', y:yInput?yInput.value:'', checked:cb?cb.checked:true});
+    const syInput=row.cells[4]?row.cells[4].querySelector('input'):null;
+    rows.push({x:xInput?xInput.value:'', y:yInput?yInput.value:'', checked:cb?cb.checked:true, sy:syInput?syInput.value:''});
   }
   return rows;
+}
+
+// Sloupec σy se do tabulky přidává/ubírá jako SKUTEČNÝ sloupec (ne jen
+// schovaný přes CSS display:none) — ukázalo se, že skrývání celého <td>
+// v kombinaci s automatickým rozvržením sloupců tabulky je v reálných
+// prohlížečích nespolehlivé (buňka pak nereaguje na klik/psaní). Proto
+// renderTableHead() i restoreTableRows()/addRow() vždy vygenerují přesně
+// tolik sloupců, kolik jich má aktivní sada dat skutečně mít.
+function sigmaYActive(){
+  const ds=datasets[activeDatasetIdx];
+  return !!(ds && ds.sigmaYOn);
+}
+
+function renderTableHead(){
+  const thead=document.getElementById('thead');
+  if(!thead) return;
+  const withSigma=sigmaYActive();
+  thead.innerHTML = '<tr><th>#</th>'
+    + '<th><input type="checkbox" id="cb-all" checked onchange="toggleAll(this.checked)" title="Zaškrtnout/odškrtnout vše"></th>'
+    + '<th>x</th><th>y</th>'
+    + (withSigma ? '<th title="Nejistota (směrodatná odchylka) hodnoty y — nepovinné">σy</th>' : '')
+    + '</tr>';
+}
+
+function sigmaTdHtml(i, syVal){
+  if(!sigmaYActive()) return '';
+  return `<td><input class="cell" type="text" placeholder="±" value="${escapeHtmlAttr(syVal||'')}" data-r="${i}" data-c="sy"
+             onkeydown="handleKey(event,${i},'sy')" oninput="autoRecompute()"></td>`;
 }
 
 function restoreTableRows(rows){
   const tb=document.getElementById('tbody');
   if(!tb) return;
+  renderTableHead();
   tb.innerHTML='';
   rows.forEach((r,i)=>{
     const tr=document.createElement('tr');
@@ -118,13 +175,18 @@ function restoreTableRows(rows){
       <td><input class="cell" type="text" value="${escapeHtmlAttr(r.x)}" data-r="${i}" data-c="x"
                  onkeydown="handleKey(event,${i},'x')" oninput="autoRecompute()"></td>
       <td><input class="cell" type="text" value="${escapeHtmlAttr(r.y)}" data-r="${i}" data-c="y"
-                 onkeydown="handleKey(event,${i},'y')" oninput="autoRecompute()"></td>`;
+                 onkeydown="handleKey(event,${i},'y')" oninput="autoRecompute()"></td>
+      ${sigmaTdHtml(i, r.sy)}`;
     tb.appendChild(tr);
   });
 }
 
 let datasets = [makeEmptyDataset('Data 1')];
 let activeDatasetIdx = 0;
+// Klik na záložku sady dat ji "zvýrazní" v grafu (ostatní sady potemní) —
+// null = žádné zvýraznění (všechny sady stejně výrazné). Nastavuje
+// onDatasetTabClick, ruší klik mimo záložky (viz listener u rtype-wrap).
+let highlightedDsIdx = null;
 
 function renderTabsUI(){
   const wrap=document.getElementById('dataset-tabs');
@@ -135,7 +197,7 @@ function renderTabsUI(){
     const label=ds.fileLabel ? `${ds.name}: ${ds.fileLabel}` : ds.name;
     const pStyle=ds.pointStyle||'circle';
     html+=`<div class="ds-row">`
-        + `<div class="ds-tab${i===activeDatasetIdx?' active':''}" onclick="switchDataset(${i})" title="${label.replace(/"/g,'&quot;')}">`
+        + `<div class="ds-tab${i===activeDatasetIdx?' active':''}${i===highlightedDsIdx?' highlighted':''}" onclick="onDatasetTabClick(${i})" title="${label.replace(/"/g,'&quot;')}">`
         +   `<span class="ds-dot" style="background:${col.point};"></span>`
         +   `<span class="ds-label">${label}</span>`
         + `</div>`
@@ -245,6 +307,7 @@ function loadDatasetSnapshotUI(idx){
   fourierManualPeriodOn=ds.fourierManualPeriodOn;
   fourierManualPeriod=ds.fourierManualPeriod;
   syncFourierControlsUI(ds);
+  syncSigmaYUI(ds);
   const br=document.getElementById('btn-regrese');
   if(br){
     br.style.color=regressionOn?'var(--accent)':'var(--text)';
@@ -266,6 +329,18 @@ function switchDataset(idx){
   loadDatasetSnapshotUI(idx);
   renderTabsUI();
   recomputeKeepVis();
+}
+
+// Klik na záložku sady dat: přepne ji jako aktivní (jako dřív) a navíc ji
+// zvýrazní v grafu — ostatní sady potemní, ať je hned jasné, které body/
+// křivka/pásmo IS patří dané sadě. switchDataset má "no-op" návrat, když je
+// sada už aktivní, proto se graf v tom případě musí překreslit ručně.
+function onDatasetTabClick(i){
+  if(i<0 || i>=datasets.length) return;
+  const alreadyActive=(i===activeDatasetIdx);
+  highlightedDsIdx=i;
+  if(alreadyActive){ renderTabsUI(); renderCombinedChart(); }
+  else switchDataset(i);
 }
 
 function addDataset(){
@@ -383,7 +458,8 @@ function addRow(){
     <td><input class="cell" type="text" placeholder="" data-r="${row}" data-c="x"
                onkeydown="handleKey(event,${row},'x')" oninput="autoRecompute()"></td>
     <td><input class="cell" type="text" placeholder="" data-r="${row}" data-c="y"
-               onkeydown="handleKey(event,${row},'y')" oninput="autoRecompute()"></td>`;
+               onkeydown="handleKey(event,${row},'y')" oninput="autoRecompute()"></td>
+    ${sigmaTdHtml(row, '')}`;
   tb.appendChild(tr);
 }
 
@@ -392,6 +468,12 @@ function handleKey(e,row,col){
   e.preventDefault();
   if(col==='x'){
     focusCell(row,'y');
+  } else if(col==='y'){
+    const ds=datasets[activeDatasetIdx];
+    if(ds && ds.sigmaYOn){ focusCell(row,'sy'); return; }
+    const tb=document.getElementById('tbody');
+    if(row===tb.rows.length-1) addRow();
+    focusCell(row+1,'x');
   } else {
     const tb=document.getElementById('tbody');
     if(row===tb.rows.length-1) addRow();
@@ -405,24 +487,27 @@ function focusCell(row,col){
 }
 
 function initTable(){
-  for(let i=0;i<6;i++) addRow();
+  renderTableHead();
+  for(let i=0;i<30;i++) addRow();
 }
 
 function getTableData(){
   const tb=document.getElementById('tbody');
-  const x=[],y=[],excl=[];
+  const x=[],y=[],excl=[],sy=[];
   for(let i=0;i<tb.rows.length;i++){
     const row=tb.rows[i];
     const cb=row.cells[1].querySelector('input[type="checkbox"]');
     const xv=row.cells[2].querySelector('input').value.trim().replace(',','.');
     const yv=row.cells[3].querySelector('input').value.trim().replace(',','.');
+    const syInput=row.cells[4]?row.cells[4].querySelector('input'):null;
+    const syv=syInput?syInput.value.trim().replace(',','.'):'';
     if(!xv||!yv) continue;
     const xf=parseFloat(xv), yf=parseFloat(yv);
     if(isNaN(xf)||isNaN(yf)) continue;
-    if(cb&&cb.checked){ x.push(xf); y.push(yf); }
+    if(cb&&cb.checked){ x.push(xf); y.push(yf); sy.push(syv===''?NaN:parseFloat(syv)); }
     else excl.push([xf,yf]);
   }
-  return{x,y,excl};
+  return{x,y,excl,sy};
 }
 
 /* ══════════════════════════════════════════════
@@ -431,17 +516,112 @@ function getTableData(){
    ne jen aktivní záložku.
 ══════════════════════════════════════════════ */
 function extractXYFromRows(rows){
-  const x=[], y=[], excl=[];
+  const x=[], y=[], excl=[], sy=[];
   (rows||[]).forEach(r=>{
     const xv=String(r.x||'').trim().replace(',','.');
     const yv=String(r.y||'').trim().replace(',','.');
     if(!xv||!yv) return;
     const xf=parseFloat(xv), yf=parseFloat(yv);
     if(isNaN(xf)||isNaN(yf)) return;
-    if(r.checked){ x.push(xf); y.push(yf); }
+    if(r.checked){
+      x.push(xf); y.push(yf);
+      const syv=String(r.sy||'').trim().replace(',','.');
+      sy.push(syv===''?NaN:parseFloat(syv));
+    }
     else excl.push([xf,yf]);
   });
-  return {x,y,excl};
+  return {x,y,excl,sy};
+}
+
+// Sestaví pole vah (1/sigma_y^2) z hodnot zadaných v tabulce, nebo null.
+// Nejistoty se použijí jen když je zapnutý přepínač sigmaYOn (jinak beze
+// změny chování, jako by σy neexistovaly). Vážení se aktivuje, jakmile má
+// KAŽDÝ zahrnutý bod platnou (kladnou) hodnotu σy. Pokud je vyplněná jen
+// ČÁST bodů, nedomýšlí se nic — fit proběhne bez váhování a uživatel je
+// o tom informován (viz volání v computeRegression).
+function computeWeights(x, y, sy, sigmaYOn, sigmaYMode){
+  if(!sigmaYOn || !Array.isArray(sy) || sy.length!==y.length || !sy.length) return {w:null, incomplete:false};
+  if(sy.some(v=>!Number.isFinite(v))) return {w:null, incomplete:true};
+  const sigmaAbs = sigmaYMode==='pct'
+    ? sy.map((p,i)=>Math.abs(y[i])*p/100)
+    : sy.slice();
+  if(sigmaAbs.some(v=>!(v>0))) return {w:null, incomplete:true};
+  return {w:sigmaAbs.map(s=>1/(s*s)), incomplete:false};
+}
+
+/* ── Nejistoty σy: hlavní přepínač zobrazí sloupec + ovládání abs/% + hromadné vyplnění ── */
+function syncSigmaYUI(ds){
+  renderTableHead();
+  const onTrack=document.getElementById('sigmay-on-track');
+  const onKnob=document.getElementById('sigmay-on-knob');
+  if(onTrack){ onTrack.style.background=ds.sigmaYOn?'#c83030':'var(--btn)'; onTrack.style.borderColor=ds.sigmaYOn?'#c83030':'var(--border)'; }
+  if(onKnob) onKnob.style.left=ds.sigmaYOn?'18px':'1px';
+  const modeRow=document.getElementById('sigmay-mode-row');
+  if(modeRow) modeRow.style.display=ds.sigmaYOn?'flex':'none';
+
+  const modeTrack=document.getElementById('sigmay-mode-track');
+  const modeKnob=document.getElementById('sigmay-mode-knob');
+  const isPct=ds.sigmaYMode==='pct';
+  if(modeTrack){ modeTrack.style.background=isPct?'#c83030':'var(--btn)'; modeTrack.style.borderColor=isPct?'#c83030':'var(--border)'; }
+  if(modeKnob) modeKnob.style.left=isPct?'18px':'1px';
+  const absLbl=document.getElementById('sigmay-mode-abs-lbl');
+  const pctLbl=document.getElementById('sigmay-mode-pct-lbl');
+  if(absLbl){ absLbl.style.color=isPct?'var(--text-muted)':'var(--accent)'; absLbl.style.fontWeight=isPct?'400':'700'; }
+  if(pctLbl){ pctLbl.style.color=isPct?'var(--accent)':'var(--text-muted)'; pctLbl.style.fontWeight=isPct?'700':'400'; }
+}
+
+// Přepnutí σy fyzicky přidá/ubere celý sloupec (viz sigmaTdHtml) — proto se
+// tabulka po přepnutí musí znovu vykreslit (zachovávajíc už zadané hodnoty),
+// nestačí jen přepnout CSS třídu na už existujících řádcích.
+function toggleSigmaY(){
+  const ds=datasets[activeDatasetIdx];
+  const rows=captureTableRows();
+  ds.sigmaYOn=!ds.sigmaYOn;
+  restoreTableRows(rows);
+  syncSigmaYUI(ds);
+  recomputeKeepVis();
+}
+
+function toggleSigmaYMode(){
+  const ds=datasets[activeDatasetIdx];
+  setSigmaYMode(ds.sigmaYMode==='pct' ? 'abs' : 'pct');
+}
+
+function setSigmaYMode(mode){
+  const ds=datasets[activeDatasetIdx];
+  if(ds.sigmaYMode===mode) return;
+  ds.sigmaYMode = mode==='pct' ? 'pct' : 'abs';
+  syncSigmaYUI(ds);
+  recomputeKeepVis();
+}
+
+// Hromadně vyplní sloupec σy pro všechny neprázdné (x i y zadané) řádky
+// tabulky stejnou hodnotou — pohodlné, když má přístroj jednu udávanou
+// přesnost pro celý rozsah měření. Čte se z vlastního inline pole přímo
+// v appce (ne z prohlížečového prompt() dialogu), ať je jasné, že jde
+// o hodnotu pro VŠECHNY body najednou — jednotlivé řádky v tabulce jde
+// kdykoli po tomto hromadném vyplnění přepsat ručně na jinou hodnotu;
+// tabulka je vždy ten skutečný zdroj dat, které se použijí ve fitu.
+function applyBulkSigmaY(){
+  const input=document.getElementById('sigmay-bulk-input');
+  if(!input) return;
+  const raw=input.value.trim();
+  if(raw===''){ input.focus(); return; }
+  const v=raw.replace(',','.');
+  if(isNaN(parseFloat(v))){ alert('Zadej platné číslo.'); input.focus(); return; }
+  const tb=document.getElementById('tbody');
+  if(!tb) return;
+  let filled=0;
+  for(let i=0;i<tb.rows.length;i++){
+    const row=tb.rows[i];
+    const xv=row.cells[2].querySelector('input').value.trim();
+    const yv=row.cells[3].querySelector('input').value.trim();
+    if(!xv||!yv) continue;
+    const syInput=row.cells[4]?row.cells[4].querySelector('input'):null;
+    if(syInput){ syInput.value=v; filled++; }
+  }
+  if(!filled){ alert('V tabulce zatím nejsou žádná úplná data (x i y), není co vyplnit.'); return; }
+  recomputeKeepVis();
 }
 
 function getSessionState(){
@@ -459,7 +639,8 @@ function getSessionState(){
       showCI:ds.showCI,
       hiddenSeries:ds.hiddenSeries||{data:false,excl:false,fit:false,ci:false},
       customFormula:ds.customFormula||null,
-      pointStyle:ds.pointStyle||'circle'
+      pointStyle:ds.pointStyle||'circle',
+      sigmaYOn:!!ds.sigmaYOn, sigmaYMode:ds.sigmaYMode||'abs'
     })),
     tools:{
       combine:{enabled:combineState.enabled, op:combineState.op, dsA:combineState.dsA, dsB:combineState.dsB},
@@ -472,6 +653,10 @@ function getSessionState(){
   };
 }
 
+// Vrací true, pokud k uložení skutečně došlo (nebo aspoň bylo spuštěno
+// stažení) — false jen když uživatel nativní dialog "Uložit jako" zrušil.
+// Potřeba pro drag&drop vkládání projektu: tam se má nový projekt vložit
+// TEPRVE PO úspěšném uložení rozpracované práce, ne bezpodmínečně.
 async function saveSession(){
   const state=getSessionState();
   const json=JSON.stringify(state,null,2);
@@ -486,9 +671,9 @@ async function saveSession(){
       const writable=await handle.createWritable();
       await writable.write(json);
       await writable.close();
-      return;
+      return true;
     }catch(err){
-      if(err && err.name==='AbortError') return; // uživatel dialog zrušil — nic dalšího nedělej
+      if(err && err.name==='AbortError') return false; // uživatel dialog zrušil
       // jinak (např. chyba zápisu) spadni do fallbacku níže
     }
   }
@@ -500,6 +685,7 @@ async function saveSession(){
   a.download='regrese_projekt.json';
   a.click();
   URL.revokeObjectURL(a.href);
+  return true;
 }
 
 function loadSession(input){
@@ -540,6 +726,7 @@ function applySessionState(state){
     renderCustomEquationDropdownItems();
   }
 
+  highlightedDsIdx=null;
   datasets=state.datasets.map(d=>Object.assign(makeEmptyDataset(d.name||'Data 1'), {
     fileLabel:d.fileLabel||null,
     tableRows:Array.isArray(d.tableRows)?d.tableRows:[],
@@ -553,7 +740,8 @@ function applySessionState(state){
     showCI:!!d.showCI,
     hiddenSeries:Object.assign({data:false,excl:false,fit:false,ci:false}, d.hiddenSeries||{}),
     customFormula:d.customFormula||null,
-    pointStyle:d.pointStyle||'circle'
+    pointStyle:d.pointStyle||'circle',
+    sigmaYOn:!!d.sigmaYOn, sigmaYMode:d.sigmaYMode==='pct'?'pct':'abs'
   }));
   activeDatasetIdx=Math.min(Math.max(state.activeDatasetIdx||0,0), datasets.length-1);
 
@@ -561,15 +749,16 @@ function applySessionState(state){
   // ať se v kombinovaném grafu hned po načtení zobrazí úplně všechno.
   const prevH=fourierHarmonics, prevAuto=fourierAutoHarmonics, prevPeriod=fourierManualPeriod;
   datasets.forEach(ds=>{
-    const {x,y,excl}=extractXYFromRows(ds.tableRows);
-    ds.x=x; ds.y=y; ds.excl=excl;
+    const {x,y,excl,sy}=extractXYFromRows(ds.tableRows);
+    ds.x=x; ds.y=y; ds.excl=excl; ds.sy=sy;
     ds.lastResult=null;
     if(ds.regressionOn && x.length>=2){
       fourierHarmonics=ds.fourierHarmonics;
       fourierAutoHarmonics=ds.fourierAutoHarmonics;
       fourierManualPeriod=ds.fourierManualPeriod;
       try{
-        ds.lastResult=computeFitForType(x,y,ds.regressionType,ds);
+        const {w}=computeWeights(x,y,sy,ds.sigmaYOn,ds.sigmaYMode);
+        ds.lastResult=computeFitForType(x,y,ds.regressionType,ds,w,!!w);
         if(ds.regressionType==='fourier') ds.fourierHarmonics=fourierHarmonics;
       }catch(e){ ds.lastResult=null; }
     }
@@ -903,6 +1092,55 @@ function addCustomFormulaToLibrary(){
   closeCustomFormulaModal();
 }
 
+// Je barva pozadí (z getComputedStyle) fakticky průhledná? Pokrývá 'rgba(0,
+// 0, 0, 0)' (výchozí nenastavené pozadí) i 'transparent' i libovolnou barvu
+// s alfa kanálem 0.
+function isBgTransparent(colorStr){
+  if(!colorStr || colorStr==='transparent') return true;
+  const m=colorStr.match(/rgba?\(([^)]+)\)/);
+  if(m){
+    const parts=m[1].split(',').map(s=>parseFloat(s.trim()));
+    return parts.length===4 && parts[3]===0;
+  }
+  return false;
+}
+// Zjistí, jestli klik dopadl do "prázdného prostoru" appky mimo jakékoli
+// okno/panel/kartu i mimo jakýkoli ovládací prvek — prochází předky od cíle
+// kliku směrem k <body> a hledá buď vlastní (neprůhledné) pozadí, nebo
+// interaktivní prvek (tlačítko, vstup, odkaz, cokoli s onclick…). Layoutové
+// obaly (.app/.main/.left a podobné bezbarvé kontejnery) nemají ani jedno,
+// takže klik do jejich okrajů/mezer "propadne" až sem jako prázdný prostor.
+// Bez druhé podmínky (interaktivní prvek) by se zvýraznění zrušilo i kliknutím
+// na tlačítka, která jsou sice funkční (uložit/načíst projekt…), ale sedí
+// přímo v levém sloupci bez vlastního pozadí panelu.
+function clickIsInEmptyGutter(target){
+  let el=target;
+  while(el && el!==document.body && el!==document.documentElement){
+    if(!isBgTransparent(getComputedStyle(el).backgroundColor)) return false;
+    if(el.matches && el.matches('button,a,input,select,textarea,[onclick],[role="button"]')) return false;
+    el=el.parentElement;
+  }
+  return true;
+}
+
+// Zvýraznění sady se ruší kliknutím kamkoli MIMO jakékoli okno/panel appky
+// (viz clickIsInEmptyGutter) — v grafu, tabulce, nastavení či přepínačích
+// režimů (to všechno jsou "okna" s vlastním pozadím) zůstává zachované.
+// POZOR: musí to být CAPTURE listener (třetí argument true), vyhodnocený
+// DŘÍV, než se stihne provést vlastní onclick zvolené záložky — klik na
+// záložku sady totiž synchronně přestaví celé #dataset-tabs (renderTabsUI
+// dělá wrap.innerHTML=...), čímž se původní kliknutý uzel odpojí ze stromu
+// (parentElement=null). V bublající fázi by pak clickIsInEmptyGutter na už
+// odpojeném uzlu vždy vrátilo "prázdný prostor" a zvýraznění by se vzápětí
+// samo zrušilo — proto se to musí stihnout vyhodnotit ještě před přestavbou.
+document.addEventListener('click',e=>{
+  if(highlightedDsIdx!==null && clickIsInEmptyGutter(e.target)){
+    highlightedDsIdx=null;
+    renderTabsUI();
+    renderCombinedChart();
+  }
+}, true);
+
 // Close dropdown when clicking outside
 document.addEventListener('click',e=>{
   const wrap=document.getElementById('rtype-wrap');
@@ -1170,9 +1408,9 @@ function toggleRegression(){
 }
 
 function showPointsOnly(){
-  const {x,y,excl}=getTableData();
+  const {x,y,excl,sy}=getTableData();
   const ds=datasets[activeDatasetIdx];
-  ds.x=x; ds.y=y; ds.excl=excl; ds.lastResult=null;
+  ds.x=x; ds.y=y; ds.excl=excl; ds.sy=sy; ds.lastResult=null;
   renderCombinedChart();
 }
 
@@ -1204,11 +1442,11 @@ function flashResultsPanel(){
 }
 
 function computeRegression(){
-  const {x,y,excl}=getTableData();
+  const {x,y,excl,sy}=getTableData();
   const eqEl=document.getElementById('resEq');
   const pmEl=document.getElementById('resParams');
   const ds=datasets[activeDatasetIdx];
-  ds.x=x; ds.y=y; ds.excl=excl;
+  ds.x=x; ds.y=y; ds.excl=excl; ds.sy=sy;
 
   if(x.length<2){
     eqEl.innerHTML='<span class="err">'+errIconSvg()+' Zadejte alespoň 2 zaškrtnuté body.</span>';
@@ -1220,10 +1458,13 @@ function computeRegression(){
 
   pulseRegressionButton();
 
+  const {w,incomplete}=computeWeights(x,y,sy,ds.sigmaYOn,ds.sigmaYMode);
+  const absoluteSigma = !!w;
+
   const type=document.getElementById('rType').value;
   let result;
   try{
-    result=computeFitForType(x,y,type,ds);
+    result=computeFitForType(x,y,type,ds,w,absoluteSigma);
     // Numericky singulární data (např. všechny x stejné) můžou z fitů vyjít
     // jako NaN/Infinity — radši srozumitelná hláška než "NaN" v parametrech.
     if(result && Array.isArray(result.yp) && result.yp.length && !result.yp.some(Number.isFinite)){
@@ -1245,7 +1486,7 @@ function computeRegression(){
     return;
   }
 
-  displayResults(result, x.length, x.length+excl.length);
+  displayResults(result, x.length, x.length+excl.length, incomplete);
   flashResultsPanel();
   ds.lastResult=result;
   lastResult=result; lastData={x,y,excl};
@@ -1305,7 +1546,7 @@ function resultToTex(r){
   return r.eq;
 }
 
-function displayResults(r, used, total){
+function displayResults(r, used, total, sigmaIncomplete){
   // Render fitted equation as KaTeX
   const eqEl=document.getElementById('resEq');
   if(eqEl){
@@ -1361,8 +1602,14 @@ function displayResults(r, used, total){
     if(r.type==='rational')
       html+=`• c = (${f6(r.c)} ± ${f6(r.seC)})<br>`;
   }
-  html+=`• R² = <span class="r2">${r.r2.toFixed(6)}</span><br>`
-       +`• Použito bodů: ${used} / ${total}`;
+  html+=`• R² = <span class="r2">${r.r2.toFixed(6)}</span><br>`;
+  if(r.chi2Info){
+    html+=`• χ²/dof = <span class="r2">${f6(r.chi2Info.chi2red)}</span> `
+         +`<span style="color:var(--text-muted);font-size:11px;">(dof = ${r.chi2Info.dof})</span><br>`;
+  } else if(sigmaIncomplete){
+    html+=`<span class="err" style="display:block;margin:2px 0;">${errIconSvg()} Nejistoty σy nejsou vyplněné (platně) pro všechny body — regrese proběhla bez vážení.</span>`;
+  }
+  html+=`• Použito bodů: ${used} / ${total}`;
   document.getElementById('resParams').innerHTML=html;
 }
 
@@ -1390,23 +1637,26 @@ function clearChart(){
   setChartEmptyState(true);
 }
 
+// Interval spolehlivosti (IS pásmo kolem proložené křivky) — obecný
+// delta-method vzorec Var(ŷ(x)) = jacFn(x)ᵀ·cov·jacFn(x), kde cov je
+// kovarianční matice parametrů fitu (viz calcCov/covMatrix u každého typu
+// regrese v regression-core.js). Funguje STEJNĚ pro lineární-v-parametrech
+// (přímka, polynom, log, exponenciála po zpětné transformaci) i nelineární
+// (LM) fity (lomenná, Gauss, multi-Gauss, Fourier, vlastní rovnice) — jacFn
+// vždy vrací lokální gradient predikce ŷ podle parametrů v bodě x.
+//
+// DŮLEŽITÉ: cov už sama o sobě správně zohledňuje váhy/absoluteSigma (viz
+// calcCov), takže u váženého fitu (reálné σy) vyjde IS pásmo užší tam, kde
+// jsou body přesně změřené (malé σy), a širší tam, kde jsou nejistoty velké
+// — na rozdíl od dřívějšího řešení, které u všech typů kromě Fourierovy řady
+// počítalo pásmo z NEVÁŽENÉHO rmse (statisticky nekonzistentní s váženým
+// fitem samotným).
 function buildCiBand(result, x, y, xSmooth, ySmooth, useCI){
   if(!(useCI && result && result.yp)) return null;
   const n=x.length;
-  const p = result.type==='polynomial'?3 : result.type==='gaussian'?4 :
-            result.type==='gaussian2'?7 : result.type==='gaussian3'?10 :
-            result.type==='rational'?3 : 2;
-  const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
   const tCrit = n>30 ? 1.96 : n>10 ? 2.228 : 2.776;
 
-  if(result.type==='linear'){
-    const xMean=x.reduce((s,v)=>s+v,0)/n;
-    const Sxx=x.reduce((s,v)=>s+(v-xMean)**2,0);
-    return {
-      upper:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)})),
-      lower:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse*Math.sqrt(1/n+((xi-xMean)**2)/Sxx)}))
-    };
-  } else if(result.type==='fourier' && result.covMatrix && result.jacFn){
+  if(result.covMatrix && result.jacFn){
     const cov=result.covMatrix;
     const seY=xSmooth.map(xi=>{
       const jv=result.jacFn(xi);
@@ -1419,6 +1669,14 @@ function buildCiBand(result, x, y, xSmooth, ySmooth, useCI){
       lower:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*seY[i]}))
     };
   }
+
+  // Záložní odhad (konstantní šířka pásma z celkového rozptylu reziduí) —
+  // jen pro případný budoucí typ regrese bez covMatrix/jacFn. Se všemi
+  // současnými typy k tomuto nikdy nedojde.
+  const p = result.type==='polynomial'?3 : result.type==='gaussian'?4 :
+            result.type==='gaussian2'?7 : result.type==='gaussian3'?10 :
+            result.type==='rational'?3 : 2;
+  const rmse=Math.sqrt(result.yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-p,1));
   return {
     upper:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]+tCrit*rmse})),
     lower:xSmooth.map((xi,i)=>({x:xi,y:ySmooth[i]-tCrit*rmse}))
@@ -1999,9 +2257,23 @@ function computeDatasetsBounds(combinedDatasets){
   let xMin=Infinity, xMax=-Infinity, yMin=Infinity, yMax=-Infinity;
   combinedDatasets.forEach(ds=>{
     if(!ds.data) return;
-    ds.data.forEach(p=>{
+    ds.data.forEach((p,i)=>{
       if(p && Number.isFinite(p.x)){ if(p.x<xMin) xMin=p.x; if(p.x>xMax) xMax=p.x; }
-      if(p && Number.isFinite(p.y)){ if(p.y<yMin) yMin=p.y; if(p.y>yMax) yMax=p.y; }
+      if(p && Number.isFinite(p.y)){
+        // Chybové úsečky (σy) kreslí vlastní plugin mimo Chart.js datové body,
+        // takže je potřeba jejich rozsah zahrnout ručně, jinak by se osa y
+        // automaticky neroztáhla a úsečky by se ořízly o okraj grafu.
+        let sigma=0;
+        if(ds._errSy){
+          const sigRaw=ds._errSy[i];
+          if(Number.isFinite(sigRaw)){
+            sigma = ds._errMode==='pct' ? Math.abs(p.y)*sigRaw/100 : sigRaw;
+            if(!(sigma>0)) sigma=0;
+          }
+        }
+        const yLo=p.y-sigma, yHi=p.y+sigma;
+        if(yLo<yMin) yMin=yLo; if(yHi>yMax) yMax=yHi;
+      }
     });
   });
   if(!Number.isFinite(xMin)||!Number.isFinite(xMax)||!Number.isFinite(yMin)||!Number.isFinite(yMax)) return null;
@@ -2204,6 +2476,45 @@ function refreshDerivativePanel(){
   updateDerivativeResultText(entry);
 }
 
+// Chart.js plugin kreslící chybové úsečky (σy) přes datové body — vlastní
+// implementace místo externí knihovny (chart.min.js je vendorovaná knihovna,
+// neupravuje se). Čte _errSy/_errMode/_errColor uložené na "Data" datasetu
+// v renderCombinedChart. Kreslí jen pro body s platnou (kladnou) σy.
+const errorBarsPlugin = {
+  id:'errorBars',
+  afterDatasetsDraw(chart){
+    const {ctx, chartArea} = chart;
+    if(!chartArea) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(chartArea.left, chartArea.top, chartArea.width, chartArea.height);
+    ctx.clip();
+    const capHalf=5;
+    chart.data.datasets.forEach((ds, idx)=>{
+      if(ds._kind!=='data' || !ds._errSy || !chart.isDatasetVisible(idx)) return;
+      const xScale=chart.scales.x, yScale=chart.scales.y;
+      if(!xScale||!yScale) return;
+      ctx.strokeStyle=ds._errColor||ds.borderColor||'#000';
+      ctx.lineWidth=1.5;
+      ds.data.forEach((pt,i)=>{
+        const sigRaw=ds._errSy[i];
+        if(!Number.isFinite(sigRaw)) return;
+        const sigma = ds._errMode==='pct' ? Math.abs(pt.y)*sigRaw/100 : sigRaw;
+        if(!(sigma>0)) return;
+        const xPix=xScale.getPixelForValue(pt.x);
+        const yTopPix=yScale.getPixelForValue(pt.y+sigma);
+        const yBotPix=yScale.getPixelForValue(pt.y-sigma);
+        ctx.beginPath();
+        ctx.moveTo(xPix, yTopPix); ctx.lineTo(xPix, yBotPix);
+        ctx.moveTo(xPix-capHalf, yTopPix); ctx.lineTo(xPix+capHalf, yTopPix);
+        ctx.moveTo(xPix-capHalf, yBotPix); ctx.lineTo(xPix+capHalf, yBotPix);
+        ctx.stroke();
+      });
+    });
+    ctx.restore();
+  }
+};
+
 function renderCombinedChart(){
   renderTabsUI();
   refreshCombinePanelOptions();
@@ -2229,11 +2540,17 @@ function renderCombinedChart(){
 
     const ptMeta=getPointStyleMeta(ds.pointStyle);
 
+    // Klik na záložku sady (highlightedDsIdx) zesvětlí ostatní sady v grafu,
+    // aby vynikla ta zvýrazněná — barvy se jen "naředí" nižší průhledností,
+    // funguje to stejně v obou motivech (viz colorWithAlpha).
+    const dim = highlightedDsIdx!==null && highlightedDsIdx!==i;
+    const a = dim ? 0.15 : 1;
+
     if(excl.length>0){
       combinedDatasets.push({
         type:'scatter',label:`Vyloučeno${suffix} (${excl.length})`,
         data:excl.map(p=>({x:p[0],y:p[1]})),
-        backgroundColor:'transparent',borderColor:col.excl,
+        backgroundColor:'transparent',borderColor:colorWithAlpha(col.excl,a),
         pointStyle:ptMeta.chart,rotation:ptMeta.rotation,
         pointRadius:6*ptMeta.sizeMult,pointBorderWidth:2,order:3,
         _dsIdx:i,_kind:'excl',hidden:!!ds.hiddenSeries.excl
@@ -2244,10 +2561,13 @@ function renderCombinedChart(){
       combinedDatasets.push({
         type:'scatter',label:`Data${suffix}`,
         data:x.map((xi,idx)=>({x:xi,y:y[idx]})),
-        backgroundColor:col.point,borderColor:'rgba(255,255,255,.7)',
+        backgroundColor:colorWithAlpha(col.point,a),borderColor:colorWithAlpha('rgba(255,255,255,.7)',a),
         borderWidth:1.5,pointRadius:6*ptMeta.sizeMult,order:3,
         pointStyle:ptMeta.chart,rotation:ptMeta.rotation,
-        _dsIdx:i,_kind:'data',hidden:!!ds.hiddenSeries.data
+        _dsIdx:i,_kind:'data',hidden:!!ds.hiddenSeries.data,
+        // Chybové úsečky (σy) — kreslí je vlastní Chart.js plugin errorBarsPlugin
+        // (viz níže), aby fungovaly i bez externí knihovny pro error bary.
+        _errSy:ds.sy, _errMode:ds.sigmaYMode, _errColor:colorWithAlpha(col.fit,a)
       });
     }
 
@@ -2262,7 +2582,7 @@ function renderCombinedChart(){
       combinedDatasets.push({
         type:'line',label:`fit${suffix}`,
         data:xSmooth.map((xi,k)=>({x:xi,y:ySmooth[k]})),
-        borderColor:col.fit,borderWidth:2.5,
+        borderColor:colorWithAlpha(col.fit,a),borderWidth:2.5,
         pointRadius:0,fill:false,tension:0,order:2,
         _dsIdx:i,_kind:'fit',hidden:!!ds.hiddenSeries.fit
       });
@@ -2273,7 +2593,7 @@ function renderCombinedChart(){
         combinedDatasets.push({
           type:'line',label:`IS 95 %${suffix}`,
           data:ci.upper,
-          borderColor:col.ciBorder,backgroundColor:col.ciBg,
+          borderColor:colorWithAlpha(col.ciBorder,a),backgroundColor:colorWithAlpha(col.ciBg,a),
           borderWidth:1,borderDash:[4,3],
           pointRadius:0,fill:'+1',tension:0,order:4,
           pointStyle:'rect',_ciPairId:i,_dsIdx:i,_kind:'ci',hidden:!!ds.hiddenSeries.ci
@@ -2281,7 +2601,7 @@ function renderCombinedChart(){
         combinedDatasets.push({
           type:'line',label:`_ciLower${suffix}`,
           data:ci.lower,
-          borderColor:col.ciBorder,backgroundColor:col.ciBg,
+          borderColor:colorWithAlpha(col.ciBorder,a),backgroundColor:colorWithAlpha(col.ciBg,a),
           borderWidth:1,borderDash:[4,3],
           pointRadius:0,fill:false,tension:0,order:5,
           _ciPairId:i,_dsIdx:i,_kind:'ci',hidden:!!ds.hiddenSeries.ci
@@ -2318,6 +2638,24 @@ function renderCombinedChart(){
     }
   }
 
+  // Chart.js by osu y automaticky roztáhl jen podle datových bodů — chybové
+  // úsečky (σy) ale kreslí samostatný plugin mimo tato data, takže bez
+  // tohoto zámku by se úsečky u krajních bodů ořízly o okraj grafu.
+  // Neaplikuje se, pokud má uživatel rozsah os nastavený ručně nebo běží
+  // zamčená osa kvůli derivaci (ta má přednost).
+  let errorBarAxisLock=null;
+  if(!derivativeAxisLock && !manualRange.active){
+    const hasErrorBars=combinedDatasets.some(d=>d._kind==='data' && Array.isArray(d._errSy) && d._errSy.some(Number.isFinite));
+    if(hasErrorBars){
+      const dataBounds=computeDatasetsBounds(combinedDatasets);
+      if(dataBounds){
+        const span=(dataBounds.yMax-dataBounds.yMin)||1;
+        const pad=span*0.08;
+        errorBarAxisLock={min:dataBounds.yMin-pad, max:dataBounds.yMax+pad};
+      }
+    }
+  }
+
   const c=chartColors();
   const activeLabels=datasets[activeDatasetIdx];
   const ctx=document.getElementById('myChart').getContext('2d');
@@ -2333,7 +2671,7 @@ function renderCombinedChart(){
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
            title:{display:true,text:activeLabels.xLabel,color:c.tick,font:{family:'Sora',size:12}}},
-        y:{type:'linear',...(derivativeAxisLock||{}),
+        y:{type:'linear',...getScaleOpts('y'),...(errorBarAxisLock||{}),...(derivativeAxisLock||{}),
            grid:{color:c.grid},
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
@@ -2385,7 +2723,7 @@ function renderCombinedChart(){
         c2.fillRect(chartArea.left,chartArea.top,chartArea.width,chartArea.height);
         c2.restore();
       }
-    }]
+    }, errorBarsPlugin]
   });
   requestAnimationFrame(updateRangeInputs);
 }
@@ -2409,9 +2747,9 @@ function loadFile(input){
   reader.readAsText(file);
 }
 
-function parseAndFill(text){
+function parseAndFill(text, fileName){
   const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
-  if(!lines.length) return;
+  if(!lines.length) return false;
 
   function splitLine(line){
     if(line.includes('\t'))  return line.split('\t').map(s=>s.trim());
@@ -2445,7 +2783,7 @@ function parseAndFill(text){
     const yv=parseFloat(parts[1].replace(',','.'));
     if(!isNaN(xv)&&!isNaN(yv)) rows.push([xv,yv]);
   }
-  if(!rows.length){ alert('Nepodařilo se načíst žádná data.'); return; }
+  if(!rows.length){ alert('Nepodařilo se načíst žádná data.'); return false; }
 
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
@@ -2470,7 +2808,242 @@ function parseAndFill(text){
   showPointsOnly();
   document.getElementById('resEq').innerHTML=
     `<span style="color:var(--success)">${okIconSvg()} Načteno ${rows.length} bodů${dataStart?` · osy: ${escapeHtmlAttr(headerX)}, ${escapeHtmlAttr(headerY)}`:''}</span>`;
+  if(fileName){ datasets[activeDatasetIdx].fileLabel=fileName; renderTabsUI(); }
+  return true;
 }
+
+/* ══════════════════════════════════════════════
+   PŘETAŽENÍ SOUBORŮ NA GRAF (DRAG & DROP)
+   Umožňuje pustit jeden nebo víc datových souborů přímo na plochu grafu.
+   Jednoduchá dvousloupcová data se vloží rovnou, složitější (víc sloupců)
+   automaticky otevřou Průvodce vložením dat — postupně pro každý soubor,
+   který to potřebuje (viz processNextDropImport). Používá stejné parsování
+   (advParse/advSplitLine) jako už existující Průvodce, aby detekce sloupců
+   byla naprosto konzistentní s tím, jak se soubor pak zobrazí uvnitř něj.
+══════════════════════════════════════════════ */
+const DROP_FILE_RE=/\.(txt|csv|tsv|dat)$/i;
+let dropImportQueue=null;      // fronta {name,text,dsIdx,isNewTab} čekajících na vložení
+let dropPendingSingleFile=null; // {name,text} čekající na volbu nová sada/přepsat
+
+// Je zadaná sada dat prázdná (žádná zapsaná/vypočtená data)? Funguje jak pro
+// právě aktivní záložku (čte živou tabulku v DOMu), tak pro neaktivní (čte
+// jejich poslední uložený snapshot) — potřeba, protože x/y/tableRows se pro
+// neaktivní záložku aktualizují až při přepnutí pryč z ní.
+function datasetIsEmpty(idx){
+  const ds=datasets[idx];
+  if(!ds) return true;
+  if(idx===activeDatasetIdx){
+    return captureTableRows().every(r=>!String(r.x||'').trim() && !String(r.y||'').trim());
+  }
+  const rowsEmpty=!ds.tableRows || !ds.tableRows.length || ds.tableRows.every(r=>!String(r.x||'').trim() && !String(r.y||'').trim());
+  return rowsEmpty && ds.x.length===0 && ds.excl.length===0;
+}
+
+// Potřebuje soubor Pokročilého průvodce (víc než 2 sloupce), nebo jde o
+// obyčejná dvousloupcová data, která lze vložit rovnou?
+function dropDataNeedsWizard(rows){
+  if(!rows.length) return false;
+  return Math.max(...rows.map(r=>r.length))>2;
+}
+
+function readFilesAsText(files){
+  return Promise.all(files.map(f=>new Promise(resolve=>{
+    const r=new FileReader();
+    r.onload=e=>resolve({name:f.name, text:e.target.result});
+    r.onerror=()=>resolve({name:f.name, text:''});
+    r.readAsText(f);
+  })));
+}
+
+let chartDragDepth=0;
+function handleChartDragEnter(e){
+  e.preventDefault();
+  chartDragDepth++;
+  document.getElementById('chartBox')?.classList.add('drag-over');
+}
+function handleChartDragOver(e){
+  e.preventDefault(); // nutné, jinak prohlížeč drop rovnou odmítne
+  if(e.dataTransfer) e.dataTransfer.dropEffect='copy';
+}
+function handleChartDragLeave(e){
+  chartDragDepth=Math.max(0,chartDragDepth-1);
+  if(chartDragDepth===0) document.getElementById('chartBox')?.classList.remove('drag-over');
+}
+function handleChartDrop(e){
+  e.preventDefault();
+  chartDragDepth=0;
+  document.getElementById('chartBox')?.classList.remove('drag-over');
+  const allFiles=[...(e.dataTransfer?.files||[])];
+
+  // Přetažený .json = celý uložený projekt, ne datový soubor — jde jinou,
+  // samostatnou cestou (viz startDropProjectImport), protože nahrazuje úplně
+  // všechno (všechny sady, nástroje, průvodce exportem…), ne jen jednu záložku.
+  const jsonFile=allFiles.find(f=>/\.json$/i.test(f.name));
+  if(jsonFile){
+    readFilesAsText([jsonFile]).then(([item])=>startDropProjectImport(item));
+    return;
+  }
+
+  const files=allFiles.filter(f=>DROP_FILE_RE.test(f.name));
+  if(!files.length){
+    if(allFiles.length) alert('Přetažený soubor není podporovaný formát dat (.txt, .csv, .tsv, .dat) ani uložený projekt (.json).');
+    return;
+  }
+  readFilesAsText(files).then(startDropImport);
+}
+
+// Jsou úplně všechny sady dat prázdné? (nic zapsáno v žádné záložce) —
+// rozhoduje, jestli je při přetažení projektu vůbec co ztratit / je potřeba
+// se ptát, co s tím.
+function allDatasetsEmpty(){
+  return datasets.every((_,i)=>datasetIsEmpty(i));
+}
+
+function parseProjectJsonText(text){
+  let state;
+  try{ state=JSON.parse(text); }
+  catch(err){ return {ok:false, error:'Soubor se nepodařilo přečíst — není to platný JSON projekt.'}; }
+  if(!state||!Array.isArray(state.datasets)||!state.datasets.length){
+    return {ok:false, error:'Tenhle soubor neobsahuje platný projekt appky.'};
+  }
+  return {ok:true, state};
+}
+
+// item: {name, text} přetaženého .json souboru.
+function startDropProjectImport(item){
+  const parsed=parseProjectJsonText(item.text);
+  if(!parsed.ok){ alert(parsed.error); return; }
+  if(allDatasetsEmpty()){
+    applySessionState(parsed.state);
+    return;
+  }
+  openDropProjectChoice(item, parsed.state);
+}
+
+let dropPendingProject=null; // {item, state} čekající na volbu smazat/uložit/zrušit
+function openDropProjectChoice(item, state){
+  dropPendingProject={item, state};
+  const fnEl=document.getElementById('drop-project-filename');
+  if(fnEl) fnEl.textContent='Soubor: '+item.name;
+  const ov=document.getElementById('drop-project-overlay');
+  if(ov) ov.style.display='flex';
+  document.body.style.overflow='hidden';
+}
+function closeDropProjectChoice(){
+  const ov=document.getElementById('drop-project-overlay');
+  if(ov) ov.style.display='none';
+  document.body.style.overflow='';
+}
+function cancelDropProjectChoice(){
+  dropPendingProject=null;
+  closeDropProjectChoice();
+}
+async function resolveDropProjectChoice(mode){
+  const pending=dropPendingProject;
+  dropPendingProject=null;
+  closeDropProjectChoice();
+  if(!pending) return;
+  if(mode==='save-then-replace'){
+    const saved=await saveSession();
+    if(!saved) return; // uživatel uložení zrušil — přetažený projekt se raději nevloží
+  }
+  applySessionState(pending.state);
+}
+document.addEventListener('keydown', e=>{
+  if(e.key!=='Escape') return;
+  const ov=document.getElementById('drop-project-overlay');
+  if(ov && ov.style.display==='flex') cancelDropProjectChoice();
+});
+
+// fileTexts: [{name, text}] — jeden nebo víc přetažených souborů najednou.
+function startDropImport(fileTexts){
+  if(!fileTexts.length) return;
+  const activeEmpty=datasetIsEmpty(activeDatasetIdx);
+
+  // Jediný soubor a aktivní záložka už má data → zeptat se uživatele, jestli
+  // chce novou sadu, nebo přepsat to, co v aktivní záložce je.
+  if(fileTexts.length===1 && !activeEmpty){
+    openDropOverwriteChoice(fileTexts[0]);
+    return;
+  }
+
+  const plan=[];
+  let skipped=0;
+  fileTexts.forEach((item,k)=>{
+    if(k===0 && activeEmpty){
+      plan.push({...item, dsIdx:activeDatasetIdx, isNewTab:false});
+      return;
+    }
+    if(datasets.length>=5){ skipped++; return; }
+    datasets.push(makeEmptyDataset('Data '+(datasets.length+1)));
+    plan.push({...item, dsIdx:datasets.length-1, isNewTab:true});
+  });
+  renderTabsUI();
+  if(skipped) alert(`Dosažen limit 5 sad dat — ${skipped} ${skipped===1?'soubor se nepodařilo načíst':'soubory/souborů se nepodařilo načíst'}.`);
+  runDropImportPlan(plan);
+}
+
+function runDropImportPlan(plan){
+  if(!plan.length) return;
+  dropImportQueue=plan;
+  processNextDropImport();
+}
+
+function processNextDropImport(){
+  if(!dropImportQueue || !dropImportQueue.length){ dropImportQueue=null; return; }
+  const item=dropImportQueue.shift();
+  switchDataset(item.dsIdx);
+  const parsed=advParse(item.text);
+  if(!parsed || !parsed.rows.length){
+    processNextDropImport();
+    return;
+  }
+  if(dropDataNeedsWizard(parsed.rows)){
+    openAdvWizardWithText(item.text, item.name); // pokračování fronty viz closeAdv()
+  } else {
+    parseAndFill(item.text, item.name);
+    processNextDropImport();
+  }
+}
+
+function openDropOverwriteChoice(fileItem){
+  dropPendingSingleFile=fileItem;
+  const fnEl=document.getElementById('drop-overwrite-filename');
+  if(fnEl) fnEl.textContent='Soubor: '+fileItem.name;
+  const dsnameEl=document.getElementById('drop-overwrite-dsname');
+  if(dsnameEl) dsnameEl.textContent=datasets[activeDatasetIdx].name;
+  const ov=document.getElementById('drop-overwrite-overlay');
+  if(ov) ov.style.display='flex';
+  document.body.style.overflow='hidden';
+}
+function closeDropOverwriteChoice(){
+  const ov=document.getElementById('drop-overwrite-overlay');
+  if(ov) ov.style.display='none';
+  document.body.style.overflow='';
+}
+function cancelDropOverwriteChoice(){
+  dropPendingSingleFile=null;
+  closeDropOverwriteChoice();
+}
+function resolveDropOverwriteChoice(mode){
+  const item=dropPendingSingleFile;
+  dropPendingSingleFile=null;
+  closeDropOverwriteChoice();
+  if(!item) return;
+  let dsIdx=activeDatasetIdx;
+  if(mode==='new'){
+    if(datasets.length>=5){ alert('Dosažen limit 5 sad dat — novou sadu už nelze přidat.'); return; }
+    datasets.push(makeEmptyDataset('Data '+(datasets.length+1)));
+    dsIdx=datasets.length-1;
+    renderTabsUI();
+  }
+  runDropImportPlan([{name:item.name, text:item.text, dsIdx, isNewTab:mode==='new'}]);
+}
+document.addEventListener('keydown', e=>{
+  if(e.key!=='Escape') return;
+  const ov=document.getElementById('drop-overwrite-overlay');
+  if(ov && ov.style.display==='flex') cancelDropOverwriteChoice();
+});
 
 /* ══════════════════════════════════════════════
    RECTANGLE SELECTION
@@ -2629,12 +3202,14 @@ function clearData(){
   if(lbl){ lbl.textContent=''; lbl.style.display='none'; }
   datasets[activeDatasetIdx].fileLabel=null;
   datasets[activeDatasetIdx].lastResult=null;
-  datasets[activeDatasetIdx].x=[]; datasets[activeDatasetIdx].y=[]; datasets[activeDatasetIdx].excl=[];
+  datasets[activeDatasetIdx].x=[]; datasets[activeDatasetIdx].y=[]; datasets[activeDatasetIdx].excl=[]; datasets[activeDatasetIdx].sy=[];
+  datasets[activeDatasetIdx].sigmaYOn=false; datasets[activeDatasetIdx].sigmaYMode='abs';
+  syncSigmaYUI(datasets[activeDatasetIdx]);
   renderTabsUI();
   const _br=document.getElementById('btn-regrese'); if(_br){_br.style.color='var(--text)';_br.style.opacity='.6';_br.title='Spustit analýzu';}
   const tb=document.getElementById('tbody');
   tb.innerHTML='';
-  for(let i=0;i<6;i++) addRow();
+  for(let i=0;i<30;i++) addRow();
   const _eq=document.getElementById('resEq'); if(_eq) _eq.textContent='—';
   document.getElementById('resParams').textContent='';
   recomputeKeepVis();
@@ -2677,6 +3252,31 @@ function svgChartPointShape(pointStyle, rotation, cx, cy, r, fill, stroke, strok
 function svgShape(styleKey, cx, cy, rBase, fill, stroke, strokeWidth){
   const meta=getPointStyleMeta(styleKey);
   return svgChartPointShape(meta.chart, meta.rotation, cx, cy, rBase*meta.sizeMult, fill, stroke, strokeWidth);
+}
+
+// Vrátí sigma_y v absolutních jednotkách pro daný bod, nebo null když
+// nejistota není platně zadaná — sdíleno mezi živým grafem i oběma cestami
+// SVG exportu, ať se všude počítá stejně (abs vs. % z |y|).
+function pointSigmaAbs(sy, mode, yVal){
+  if(!Number.isFinite(sy)) return null;
+  const sigma = mode==='pct' ? Math.abs(yVal)*sy/100 : sy;
+  return sigma>0 ? sigma : null;
+}
+
+// Chybová úsečka (±σy) v SVG — svislá čára s "vousy" nahoře/dole, oříznutá
+// na hranice vykreslovací oblasti grafu (stejně jako IS pásmo), aby
+// nepřesahovala mimo graf.
+function svgErrorBar(px, py, xi, yi, sigma, color, mt, ph, capHalf){
+  capHalf = capHalf||5;
+  const xPix=px(xi);
+  const yA=py(yi+sigma), yB=py(yi-sigma);
+  const top=mt, bot=mt+ph;
+  const yTop=Math.max(top, Math.min(bot, Math.min(yA,yB)));
+  const yBot=Math.max(top, Math.min(bot, Math.max(yA,yB)));
+  let svg=`<line x1="${xPix.toFixed(1)}" y1="${yTop.toFixed(1)}" x2="${xPix.toFixed(1)}" y2="${yBot.toFixed(1)}" stroke="${color}" stroke-width="1.5"/>`;
+  svg+=`<line x1="${(xPix-capHalf).toFixed(1)}" y1="${yTop.toFixed(1)}" x2="${(xPix+capHalf).toFixed(1)}" y2="${yTop.toFixed(1)}" stroke="${color}" stroke-width="1.5"/>`;
+  svg+=`<line x1="${(xPix-capHalf).toFixed(1)}" y1="${yBot.toFixed(1)}" x2="${(xPix+capHalf).toFixed(1)}" y2="${yBot.toFixed(1)}" stroke="${color}" stroke-width="1.5"/>`;
+  return svg;
 }
 
 function svgAxesAndGrid(ml, mt, pw, ph, xMin, xMax, yMin, yMax){
@@ -2875,7 +3475,12 @@ function saveGraphSVG(){
   }
 
   if(dataVisible){
+    const sy=activeDs.sy||[], sigmaYMode=activeDs.sigmaYMode;
     x.forEach((xi,i)=>{ svg+=svgShape(ptMeta.key, px(xi), py(y[i]), 6, col.point, 'rgba(0,0,0,0.25)', 1.5); });
+    x.forEach((xi,i)=>{
+      const sigma=pointSigmaAbs(sy[i], sigmaYMode, y[i]);
+      if(sigma!=null) svg+=svgErrorBar(px, py, xi, y[i], sigma, col.fit, mt, ph);
+    });
   }
   if(exclVisible){
     excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), 6, 'none', col.excl, 2); });
@@ -2963,7 +3568,12 @@ function saveGraphAllSVG(){
     }
 
     if(dataVisible){
+      const sy=ds.sy||[], sigmaYMode=ds.sigmaYMode;
       x.forEach((xi,k)=>{ svg+=svgShape(ptMeta.key, px(xi), py(y[k]), 6, col.point, 'rgba(0,0,0,0.25)', 1.5); });
+      x.forEach((xi,k)=>{
+        const sigma=pointSigmaAbs(sy[k], sigmaYMode, y[k]);
+        if(sigma!=null) svg+=svgErrorBar(px, py, xi, y[k], sigma, col.fit, mt, ph);
+      });
     }
     if(exclVisible){
       excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), 6, 'none', col.excl, 2); });
@@ -3879,7 +4489,12 @@ function buildAdvExportSvg(forExport){
       }
     }
     if(dataVisible){
+      const sy=ds.sy||[], sigmaYMode=ds.sigmaYMode;
       x.forEach((xi,k)=>{ inner+=svgShape(cfg.pointStyle, px(xi), py(y[k]), cfg.pointSize, col.point, 'rgba(0,0,0,0.25)', 1.5); });
+      x.forEach((xi,k)=>{
+        const sigma=pointSigmaAbs(sy[k], sigmaYMode, y[k]);
+        if(sigma!=null) inner+=svgErrorBar(px, py, xi, y[k], sigma, col.fit, mt, ph);
+      });
     }
     if(exclVisible){
       excl.forEach(([xi,yi])=>{ inner+=svgShape(cfg.pointStyle, px(xi), py(yi), cfg.pointSize, 'none', col.excl, 2); });
@@ -4223,29 +4838,59 @@ async function loadNavod() {
    PRŮVODCE VLOŽENÍM DAT
 ══════════════════════════════════════════════ */
 let advParsed = null; // { headers: bool, data: string[][] (rows×cols) }
-let advSelX = null, advSelY = null; // index vybraného sloupce/řádku
+let advSelX = null, advSelY = null, advSelSy = null; // index vybraného sloupce/řádku
+let advWantSigma = false; // "chci vybrat i σy" — volitelné, nikdy neblokuje potvrzení
 let advFileName = null;
+
+// Otevře Průvodce vložením dat pro daný text — sdíleno mezi ručním tlačítkem
+// "načíst pokročilé" (advLoadFile) a automatickým vkládáním přetažením
+// souborů na graf (viz processNextDropImport níže). Jméno souboru se vždy
+// zobrazí v hlavičce průvodce (updateAdvFileNameDisplay), ať uživatel vždy
+// vidí, o jaká data jde.
+function openAdvWizardWithText(text, fileName){
+  advFileName = fileName;
+  advParsed = advParse(text);
+  advSelX = null; advSelY = null;
+  advRender();
+  updateAdvFileNameDisplay();
+  const ov = document.getElementById('adv-overlay');
+  ov.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+}
+
+function updateAdvFileNameDisplay(){
+  const el=document.getElementById('adv-filename-display');
+  if(!el) return;
+  if(!advFileName){ el.style.display='none'; return; }
+  el.style.display='block';
+  let txt='Soubor: '+advFileName;
+  if(dropImportQueue && dropImportQueue.length){
+    txt+=` — zbývá načíst ještě: ${dropImportQueue.length}`;
+  }
+  el.textContent=txt;
+}
 
 function advLoadFile(input){
   const file = input.files[0];
   if(!file) return;
-  advFileName = file.name;
   input.value = '';
   const reader = new FileReader();
-  reader.onload = e => {
-    advParsed = advParse(e.target.result);
-    advSelX = null; advSelY = null;
-    advRender();
-    const ov = document.getElementById('adv-overlay');
-    ov.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-  };
+  reader.onload = e => { openAdvWizardWithText(e.target.result, file.name); };
   reader.readAsText(file);
 }
 
 function closeAdv(){
   document.getElementById('adv-overlay').style.display = 'none';
   document.body.style.overflow = '';
+  // Zavření/zrušení průvodce (křížek, Esc, klik mimo) uprostřed dávkového
+  // vkládání víc souborů přetažením neruší celou frontu — jen přeskočí tenhle
+  // soubor a pokračuje dalším (viz processNextDropImport).
+  advanceDropImportQueueIfAny();
+}
+
+function advanceDropImportQueueIfAny(){
+  if(dropImportQueue && dropImportQueue.length) processNextDropImport();
+  else dropImportQueue=null;
 }
 
 document.addEventListener('keydown', e => { if(e.key==='Escape') closeAdv(); });
@@ -4285,7 +4930,7 @@ function advIsNum(v){ return !isNaN(v.replace(',','.')); }
 
 function advRender(){
   if(!advParsed) return;
-  advSelX = null; advSelY = null;
+  advSelX = null; advSelY = null; advSelSy = null;
   updateAdvConfirm();
 
   const orient = advGetOrient();
@@ -4296,7 +4941,7 @@ function advRender(){
   tbl.innerHTML = '';
 
   if(orient === 'cols'){
-    document.getElementById('adv-hint').innerHTML = 'Klikni na záhlaví sloupce pro výběr jako <b>x</b> nebo <b>y</b>';
+    document.getElementById('adv-hint').innerHTML = 'Klikni na záhlaví sloupce pro výběr jako <b>x</b> nebo <b>y</b>' + (advWantSigma ? ' (volitelně i <b>σy</b>)' : '');
     // Sloupce: klikáme na záhlaví (th v prvním řádku)
     const colCount = Math.max(...rows.map(r=>r.length));
     const thead = tbl.createTHead();
@@ -4344,72 +4989,98 @@ function advRender(){
     } else { note.style.display='none'; }
 
   } else {
-    // Řádky: klikáme na první buňku řádku (záhlaví řádku)
+    // Řádky: klikáme na první buňku řádku (záhlaví řádku). POZOR: "hasHeader"
+    // tady znamená jen "sloupec 0 obsahuje textový popisek řádku" (např. "L
+    // (m)"/"T (s)") — NEznamená, že řádek 0 samotný není platná data. Dřív se
+    // tyhle dva pojmy pletly a řádek 0 byl kvůli tomu natvrdo neklikatelný
+    // ("↳ záhlaví"), takže u souboru jen se dvěma řádky (typicky x-řádek a
+    // y-řádek) nešlo vybrat jako x/y vůbec nic z toho horního — právě tenhle
+    // bug. Teď je klikatelný a vybratelný úplně každý řádek.
     const colCount = Math.max(...rows.map(r=>r.length));
     const startCol = hasHeader ? 1 : 0;
     const warnEl = document.getElementById('adv-hint');
-    warnEl.innerHTML = 'Klikni na záhlaví řádku pro výběr jako <b>x</b> nebo <b>y</b>';
+    warnEl.innerHTML = 'Klikni na záhlaví řádku pro výběr jako <b>x</b> nebo <b>y</b>' + (advWantSigma ? ' (volitelně i <b>σy</b>)' : '');
 
     const tbody = tbl.createTBody();
     const shown = rows.slice(0, PREVIEW+1);
     shown.forEach((row, ri)=>{
-      const isHeaderRow = (ri===0 && hasHeader);
       const tr = tbody.insertRow();
       tr.dataset.row = ri;
 
       const th = document.createElement('th');
-      const label = hasHeader ? (row[0]||`Řádek ${ri}`) : `Řádek ${ri+1}`;
-      th.textContent = isHeaderRow ? '↳ záhlaví' : label;
+      const label = hasHeader ? (row[0]||`Řádek ${ri+1}`) : `Řádek ${ri+1}`;
+      th.textContent = label;
       th.dataset.row = ri;
       th.style.cssText = `padding:6px 10px;border:1px solid var(--border);background:var(--surface2);
-        cursor:${isHeaderRow?'default':'pointer'};white-space:nowrap;font-size:12.5px;color:${isHeaderRow?'var(--text-muted)':'var(--text)'};
+        cursor:pointer;white-space:nowrap;font-size:12.5px;color:var(--text);
         text-align:left;font-weight:600;transition:background .1s;`;
-      if(!isHeaderRow){
-        th.title = 'Klikni pro výběr jako x nebo y';
-        th.onmouseenter = ()=>{ if(ri!=advSelX && ri!=advSelY) th.style.background='var(--btn-h)'; };
-        th.onmouseleave = ()=>{ advColorRow(ri); };
-        th.onclick = ()=> advClickRow(ri);
-      }
+      th.title = 'Klikni pro výběr jako x nebo y';
+      th.onmouseenter = ()=>{ if(ri!=advSelX && ri!=advSelY) th.style.background='var(--btn-h)'; };
+      th.onmouseleave = ()=>{ advColorRow(ri); };
+      th.onclick = ()=> advClickRow(ri);
       tr.appendChild(th);
 
-      const startCol = hasHeader ? 1 : 0;
       const colsToShow = Math.min(row.length, startCol+20);
       for(let c=startCol; c<colsToShow; c++){
         const td = tr.insertCell();
         td.textContent = row[c]||'';
         td.dataset.row = ri;
-        td.style.cssText = `padding:4px 8px;border:1px solid var(--border);color:${isHeaderRow?'var(--text-muted)':'var(--text)'};`;
+        td.style.cssText = `padding:4px 8px;border:1px solid var(--border);color:var(--text);`;
       }
     });
 
     const note = document.getElementById('adv-truncnote');
-    const total = rows.length - (hasHeader?1:0);
+    const total = rows.length;
     if(total > PREVIEW){
       note.style.display='block';
-      note.textContent = `Zobrazeno prvních ${PREVIEW} z ${total} datových řádků.`;
+      note.textContent = `Zobrazeno prvních ${PREVIEW} z ${total} řádků.`;
     } else { note.style.display='none'; }
   }
 }
 
+// Obecný click-cyklus pro výběr rolí (x, y, volitelně σy) na sloupci/řádku
+// v Průvodci vložením dat. Bez zapnutého "chci vybrat i σy" (advWantSigma=false,
+// roles.length===2) se chová ÚPLNĚ STEJNĚ jako původní ruční 2-rolová logika
+// (ověřeno rozborem všech větví) — σy rozšíření tedy nemůže rozbít existující
+// výběr x/y, jen přidává třetí, čistě volitelnou roli na konec cyklu.
+function advClickGeneric(idx){
+  const roles = advWantSigma ? ['selX','selY','selSy'] : ['selX','selY'];
+  const sel = {selX:advSelX, selY:advSelY, selSy:advSelSy};
+
+  let assignedRole = null;
+  for(const r of roles) if(sel[r] === idx){ assignedRole = r; break; }
+
+  if(assignedRole){
+    // klik na už vybranou položku: uvolní ji, následující role se posunou o jednu dopředu
+    const i = roles.indexOf(assignedRole);
+    for(let k=i; k<roles.length-1; k++) sel[roles[k]] = sel[roles[k+1]];
+    sel[roles[roles.length-1]] = null;
+  } else {
+    let placed = false;
+    for(const r of roles){
+      if(sel[r] === null){ sel[r] = idx; placed = true; break; }
+    }
+    if(!placed) sel[roles[roles.length-1]] = idx; // všechny role obsazené → nahradí poslední
+  }
+
+  advSelX = sel.selX; advSelY = sel.selY; advSelSy = sel.selSy;
+}
+
 function advClickCol(c){
-  if(advSelX === null){ advSelX = c; }
-  else if(advSelY === null && c !== advSelX){ advSelY = c; }
-  else if(c === advSelX){ advSelX = advSelY; advSelY = null; }
-  else if(c === advSelY){ advSelY = null; }
-  else { advSelY = c; }
+  advClickGeneric(c);
   advColorAllCols();
   updateAdvConfirm();
 }
 
 function advColorCol(c){
   const tbl = document.getElementById('adv-table');
-  const isX = (c == advSelX), isY = (c == advSelY);
+  const isX = (c == advSelX), isY = (c == advSelY), isSy = advWantSigma && (c == advSelSy);
   tbl.querySelectorAll(`[data-col="${c}"]`).forEach(el=>{
     if(el.tagName==='TH'){
-      el.style.background = isX ? 'rgba(74,158,255,.25)' : isY ? 'rgba(76,222,140,.25)' : 'var(--surface2)';
-      el.style.color = isX ? 'var(--accent)' : isY ? 'var(--success)' : 'var(--text)';
+      el.style.background = isX ? 'rgba(74,158,255,.25)' : isY ? 'rgba(76,222,140,.25)' : isSy ? 'rgba(224,123,0,.25)' : 'var(--surface2)';
+      el.style.color = isX ? 'var(--accent)' : isY ? 'var(--success)' : isSy ? '#e07b00' : 'var(--text)';
     } else {
-      el.style.background = isX ? 'rgba(74,158,255,.08)' : isY ? 'rgba(76,222,140,.08)' : '';
+      el.style.background = isX ? 'rgba(74,158,255,.08)' : isY ? 'rgba(76,222,140,.08)' : isSy ? 'rgba(224,123,0,.08)' : '';
     }
   });
 }
@@ -4421,24 +5092,20 @@ function advColorAllCols(){
 }
 
 function advClickRow(ri){
-  if(advSelX === null){ advSelX = ri; }
-  else if(advSelY === null && ri !== advSelX){ advSelY = ri; }
-  else if(ri === advSelX){ advSelX = advSelY; advSelY = null; }
-  else if(ri === advSelY){ advSelY = null; }
-  else { advSelY = ri; }
+  advClickGeneric(ri);
   advColorAllRows();
   updateAdvConfirm();
 }
 
 function advColorRow(ri){
   const tbl = document.getElementById('adv-table');
-  const isX = (ri == advSelX), isY = (ri == advSelY);
+  const isX = (ri == advSelX), isY = (ri == advSelY), isSy = advWantSigma && (ri == advSelSy);
   tbl.querySelectorAll(`[data-row="${ri}"]`).forEach(el=>{
     if(el.tagName==='TH'){
-      el.style.background = isX ? 'rgba(74,158,255,.25)' : isY ? 'rgba(76,222,140,.25)' : 'var(--surface2)';
-      el.style.color = isX ? 'var(--accent)' : isY ? 'var(--success)' : 'var(--text)';
+      el.style.background = isX ? 'rgba(74,158,255,.25)' : isY ? 'rgba(76,222,140,.25)' : isSy ? 'rgba(224,123,0,.25)' : 'var(--surface2)';
+      el.style.color = isX ? 'var(--accent)' : isY ? 'var(--success)' : isSy ? '#e07b00' : 'var(--text)';
     } else {
-      el.style.background = isX ? 'rgba(74,158,255,.08)' : isY ? 'rgba(76,222,140,.08)' : '';
+      el.style.background = isX ? 'rgba(74,158,255,.08)' : isY ? 'rgba(76,222,140,.08)' : isSy ? 'rgba(224,123,0,.08)' : '';
     }
   });
 }
@@ -4448,18 +5115,35 @@ function advColorAllRows(){
   advParsed.rows.forEach((_,ri)=>advColorRow(ri));
 }
 
+// Zapnutí/vypnutí volitelného výběru σy (checkbox v kroku 1). Nikdy nemaže
+// výběr x/y a nikdy neblokuje potvrzení — je to čistě doplňkový výběr navíc.
+function advToggleWantSigma(checked){
+  advWantSigma = checked;
+  if(!checked) advSelSy = null;
+  const orient = advGetOrient();
+  if(orient === 'cols') advColorAllCols(); else advColorAllRows();
+  updateAdvConfirm();
+}
+
 function updateAdvConfirm(){
   const btn = document.getElementById('adv-confirm');
   const info = document.getElementById('adv-selection-info');
   const ready = advSelX !== null && advSelY !== null;
   btn.disabled = !ready;
   btn.style.opacity = ready ? '.85' : '.4';
+  let html;
   if(advSelX === null && advSelY === null)
-    info.innerHTML = '<span style="color:var(--text-muted)">Zatím nevybráno</span>';
+    html = '<span style="color:var(--text-muted)">Zatím nevybráno</span>';
   else if(advSelX !== null && advSelY === null)
-    info.innerHTML = `<span style="color:var(--accent)">■ x vybráno</span> &nbsp; <span style="color:var(--text-muted)">■ y — klikni na další</span>`;
+    html = `<span style="color:var(--accent)">■ x vybráno</span> &nbsp; <span style="color:var(--text-muted)">■ y — klikni na další</span>`;
   else
-    info.innerHTML = `<span style="color:var(--accent)">■ x vybráno</span> &nbsp; <span style="color:var(--success)">■ y vybráno</span>`;
+    html = `<span style="color:var(--accent)">■ x vybráno</span> &nbsp; <span style="color:var(--success)">■ y vybráno</span>`;
+  if(advWantSigma){
+    html += ' &nbsp; ' + (advSelSy !== null
+      ? `<span style="color:#e07b00">■ σy vybráno</span>`
+      : `<span style="color:var(--text-muted)">■ σy — volitelné, klikni pro výběr</span>`);
+  }
+  info.innerHTML = html;
 }
 
 function advConfirm(){
@@ -4467,8 +5151,10 @@ function advConfirm(){
   const orient = advGetOrient();
   const { rows } = advParsed;
   const hasHeader = advHasHeader(rows, orient);
+  // σy je čistě volitelný — potvrzení nikdy nezávisí na tom, jestli je vybraný.
+  const wantSy = advWantSigma && advSelSy !== null;
 
-  let xVals=[], yVals=[], labelX='x', labelY='y';
+  let xVals=[], yVals=[], syVals=[], labelX='x', labelY='y';
 
   if(orient === 'cols'){
     if(hasHeader){
@@ -4479,10 +5165,17 @@ function advConfirm(){
     dataRows.forEach(row=>{
       const xv = parseFloat((row[advSelX]||'').replace(',','.'));
       const yv = parseFloat((row[advSelY]||'').replace(',','.'));
-      if(!isNaN(xv)&&!isNaN(yv)){ xVals.push(xv); yVals.push(yv); }
+      if(!isNaN(xv)&&!isNaN(yv)){
+        xVals.push(xv); yVals.push(yv);
+        if(wantSy){
+          const sv = parseFloat((row[advSelSy]||'').replace(',','.'));
+          syVals.push(isNaN(sv) ? '' : sv);
+        }
+      }
     });
   } else {
     const xRow = rows[advSelX], yRow = rows[advSelY];
+    const syRow = wantSy ? rows[advSelSy] : null;
     const startCol = hasHeader ? 1 : 0;
     if(hasHeader){
       labelX = xRow[0] || 'x';
@@ -4492,7 +5185,13 @@ function advConfirm(){
     for(let c=startCol; c<len; c++){
       const xv = parseFloat((xRow[c]||'').replace(',','.'));
       const yv = parseFloat((yRow[c]||'').replace(',','.'));
-      if(!isNaN(xv)&&!isNaN(yv)){ xVals.push(xv); yVals.push(yv); }
+      if(!isNaN(xv)&&!isNaN(yv)){
+        xVals.push(xv); yVals.push(yv);
+        if(wantSy){
+          const sv = syRow ? parseFloat((syRow[c]||'').replace(',','.')) : NaN;
+          syVals.push(isNaN(sv) ? '' : sv);
+        }
+      }
     }
   }
 
@@ -4505,25 +5204,22 @@ function advConfirm(){
   if(lx) lx.value=labelX;
   if(ly) ly.value=labelY;
 
-  const tb=document.getElementById('tbody');
-  tb.innerHTML='';
   regressionOn=false;
   const _br=document.getElementById('btn-regrese');
   if(_br){_br.style.color='var(--text)';_br.style.opacity='.6';_br.title='Spustit analýzu';}
   const _eq=document.getElementById('resEq'); if(_eq) _eq.textContent='—';
   document.getElementById('resParams').textContent='';
 
-  xVals.forEach((xv,i)=>{
-    const tr=document.createElement('tr');
-    tr.innerHTML=`
-      <td class="row-num">${i+1}</td>
-      <td><input type="checkbox" checked onchange="autoRecompute()"></td>
-      <td><input class="cell" type="text" value="${xv}" data-r="${i}" data-c="x"
-                 onkeydown="handleKey(event,${i},'x')" oninput="autoRecompute()"></td>
-      <td><input class="cell" type="text" value="${yVals[i]}" data-r="${i}" data-c="y"
-                 onkeydown="handleKey(event,${i},'y')" oninput="autoRecompute()"></td>`;
-    tb.appendChild(tr);
-  });
+  const ds = datasets[activeDatasetIdx];
+  if(wantSy) ds.sigmaYOn = true; // vynutí zobrazení sloupce σy hned po importu
+
+  const importRows = xVals.map((xv,i)=>({
+    x:String(xv), y:String(yVals[i]), checked:true,
+    sy: wantSy && syVals[i]!=='' ? String(syVals[i]) : ''
+  }));
+  restoreTableRows(importRows); // regeneruje thead i tbody se správným počtem sloupců
+  syncSigmaYUI(ds);
+
   addRow();
   updateMasterCheckbox();
   if(advFileName){ datasets[activeDatasetIdx].fileLabel=advFileName; renderTabsUI(); }

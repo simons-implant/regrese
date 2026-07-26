@@ -17,6 +17,22 @@ function matMul(A,B) {
   return A.map(row=>B[0].map((_,j)=>row.reduce((s,v,k)=>s+v*B[k][j],0)));
 }
 
+// ── Vážené verze pro WLS (vážené nejmenší čtverce) ──
+// w = pole vah (1/sigma_y^2), délka = počet bodů. Když w===null, chová se
+// jako nevážený případ (ekvivalentní w=[1,1,...,1]) a výsledky jsou IDENTICKÉ
+// s původním nevahovaným výpočtem (zpětná kompatibilita).
+function onesW(n){ return Array(n).fill(1); }
+
+// Xt · diag(w) · Xd  (Xt = matT(Xd), aby se nepočítalo dvakrát)
+function matMulW(Xt, w, Xd) {
+  return Xt.map(row=>Xd[0].map((_,j)=>row.reduce((s,v,k)=>s+v*w[k]*Xd[k][j],0)));
+}
+
+// Xt · diag(w) · y
+function matVecW(Xt, w, y) {
+  return Xt.map(row=>row.reduce((s,v,k)=>s+v*w[k]*y[k],0));
+}
+
 function inv2(M) {
   const det = M[0][0]*M[1][1] - M[0][1]*M[1][0];
   if(Math.abs(det)<1e-14) throw new Error("Singulární matice – body leží na přímce?");
@@ -33,18 +49,43 @@ function inv3(M) {
           [(d*h-e*g)/det,(b*g-a*h)/det,(a*e-b*d)/det]];
 }
 
-function calcSE(Xd, y, yp, p) {
+// absoluteSigma: true když sigma_y jsou skutečné (např. z přístroje) —
+// pak se kovariance NEŠKÁLUJE reziduální varancí (standardní postup
+// ve fyzice/metrologii, viz Taylor: Error Analysis, nebo scipy curve_fit
+// s absolute_sigma=True). Když false (nemáme reálné sigma_y, w=1), škáluje
+// se s2=SSE/(n-p) přesně jako dosud — beze změny chování.
+//
+// calcCov vrací CELOU kovarianční matici parametrů (ne jen diagonálu jako
+// calcSE) — potřebné pro korektní interval spolehlivosti predikce ŷ(x) přes
+// delta-metodu Var(ŷ(x)) = jacFn(x)ᵀ·cov·jacFn(x) (viz buildCiBand v app.js).
+// calcSE je nadále jen tenký wrapper nad calcCov (přesně stejná čísla jako
+// předtím — beze změny chování).
+function calcCov(Xd, y, yp, p, w=null, absoluteSigma=false) {
   const n = y.length;
-  const s2 = sum(y.map((v,i)=>(v-yp[i])**2)) / Math.max(n-p, 1);
+  const ww = w || onesW(n);
+  const wsse = sum(y.map((v,i)=>ww[i]*(v-yp[i])**2));
+  const s2 = (absoluteSigma && w) ? 1 : wsse / Math.max(n-p, 1);
   const Xt = matT(Xd);
-  const XtX = matMul(Xt, Xd);
+  const XtX = w ? matMulW(Xt, ww, Xd) : matMul(Xt, Xd);
   const inv = p===2 ? inv2(XtX) : inv3(XtX);
-  return inv.map((_,i) => Math.sqrt(Math.max(0, inv[i][i]*s2)));
+  return inv.map(row=>row.map(v=>v*s2));
 }
 
-function linRaw(x, y) {
+function calcSE(Xd, y, yp, p, w=null, absoluteSigma=false) {
+  const cov = calcCov(Xd, y, yp, p, w, absoluteSigma);
+  return cov.map((row,i) => Math.sqrt(Math.max(0, row[i])));
+}
+
+function linRaw(x, y, w=null) {
   const Xd = x.map(xi=>[xi,1]);
   const Xt = matT(Xd);
+  if(w){
+    const XtX = matMulW(Xt, w, Xd);
+    const XtY = matVecW(Xt, w, y);
+    const inv = inv2(XtX);
+    const p = inv.map(r=>sum(r.map((v,j)=>v*XtY[j])));
+    return {a:p[0], b:p[1]};
+  }
   const XtX = matMul(Xt,Xd);
   const XtY = Xt.map(r=>sum(r.map((v,j)=>v*y[j])));
   const inv = inv2(XtX);
@@ -52,63 +93,106 @@ function linRaw(x, y) {
   return {a:p[0], b:p[1]};
 }
 
+// Redukované chí-kvadrát (chi2/dof) — ukazatel kvality proložení při
+// známých sigma_y. chi2 = sum(wi*ri^2), dof = n - p (počet bodů minus
+// počet volných parametrů). Vrací null, když nemáme váhy (nedává smysl).
+function calcChi2(y, yp, w, p) {
+  if(!w) return null;
+  const n = y.length;
+  const chi2 = sum(y.map((v,i)=>w[i]*(v-yp[i])**2));
+  const dof = Math.max(n-p, 1);
+  return {chi2, dof, chi2red: chi2/dof};
+}
+
 function f6(v){return v>=0?v.toFixed(6):String(v.toFixed(6));}
 
-function doLinear(x,y){
-  const {a,b}=linRaw(x,y);
+function doLinear(x,y,w=null,absoluteSigma=false){
+  const {a,b}=linRaw(x,y,w);
   const yp=x.map(xi=>a*xi+b);
   const r2=calcR2(y,yp);
   const Xd=x.map(xi=>[xi,1]);
-  const [seA,seB]=calcSE(Xd,y,yp,2);
-  return{type:'linear',a,b,seA,seB,r2,yp,
+  const covMatrix=calcCov(Xd,y,yp,2,w,absoluteSigma);
+  const [seA,seB]=covMatrix.map((row,i)=>Math.sqrt(Math.max(0,row[i])));
+  const chi2Info=calcChi2(y,yp,w,2);
+  return{type:'linear',a,b,seA,seB,r2,yp,chi2Info,
+         covMatrix,jacFn:xi=>[xi,1],
          eq:`y = ${f6(a)}x + ${f6(b)}`,
          smooth:xi=>a*xi+b};
 }
 
-function doExponential(x,y){
+function doExponential(x,y,w=null,absoluteSigma=false){
   if(y.some(v=>v<=0)) throw new Error("Exponenciální regrese vyžaduje všechny y > 0");
   const lnY=y.map(Math.log);
-  const {a:bP, b:lnA}=linRaw(x,lnY);
+  // Vážení proloženo v log-prostoru: přenos chyby dln(y)=dy/y, tedy
+  // váha v log-prostoru w_ln = w_y * y^2 (delta-metoda), aby výsledné
+  // sigma_y na originální škále odpovídalo zadaným sigma_y.
+  const wLn = w ? w.map((wi,i)=>wi*y[i]*y[i]) : null;
+  const {a:bP, b:lnA}=linRaw(x,lnY,wLn);
   const a=Math.exp(lnA), b=bP;
   const yp=x.map(xi=>a*Math.exp(b*xi));
   const r2=calcR2(y,yp);
   const Xd=x.map(xi=>[xi,1]);
-  const [seA,seB]=calcSE(Xd,y,yp,2);
-  return{type:'exponential',a,b,seA,seB,r2,yp,
+  // Nevážený případ (w=null): zachovat přesně původní chování (SE počítané
+  // z reziduí v původním y-měřítku, kvůli zpětné kompatibilitě). Vážený
+  // případ: SE konzistentně v log-prostoru (kde se fit skutečně provádí),
+  // s váhami wLn odvozenými delta-metodou.
+  const [seA,seB]= w
+    ? calcSE(Xd,lnY,x.map(xi=>bP*xi+lnA),2,wLn,absoluteSigma)
+    : calcSE(Xd,y,yp,2);
+  const chi2Info=calcChi2(y,yp,w,2);
+  // Interval spolehlivosti (viz buildCiBand v app.js) potřebuje kovarianci a
+  // gradient PŘÍMO v originální (nelogaritmované) škále — proto se počítá
+  // samostatně od legacy seA/seB výše (ty se z historických důvodů v
+  // neváženém případě počítají nekonzistentně, viz komentář nahoře, a
+  // neodpovídají přesně log-prostoru). covMatrix je vždy z log-prostoru
+  // (matematicky správný způsob, jak fit skutečně proběhl) a jacFn pomocí
+  // řetězového pravidla (d ŷ/d(bP)=x·ŷ, d ŷ/d(lnA)=ŷ, protože ŷ=exp(bP·x+lnA))
+  // převádí gradient zpět na originální škálu, takže obecný vzorec
+  // Var(ŷ(x))=jacFn(x)ᵀ·cov·jacFn(x) funguje stejně jako u ostatních typů.
+  const covMatrix=calcCov(Xd,lnY,x.map(xi=>bP*xi+lnA),2,wLn,absoluteSigma);
+  const jacFn=xi=>{ const yhat=a*Math.exp(b*xi); return [xi*yhat, yhat]; };
+  return{type:'exponential',a,b,seA,seB,r2,yp,chi2Info,
+         covMatrix,jacFn,
          eq:`y = ${f6(a)}·e^(${f6(b)}x)`,
          smooth:xi=>a*Math.exp(b*xi)};
 }
 
-function doPolynomial(x,y){
+function doPolynomial(x,y,w=null,absoluteSigma=false){
   if(x.length<3) throw new Error("Polynomiální regrese 2° vyžaduje alespoň 3 body.");
   const Xd=x.map(xi=>[xi*xi,xi,1]);
   const Xt=matT(Xd);
-  const XtX=matMul(Xt,Xd);
-  const XtY=Xt.map(r=>sum(r.map((v,j)=>v*y[j])));
+  const XtX=w?matMulW(Xt,w,Xd):matMul(Xt,Xd);
+  const XtY=w?matVecW(Xt,w,y):Xt.map(r=>sum(r.map((v,j)=>v*y[j])));
   const inv=inv3(XtX);
   const [a,b,c]=inv.map(r=>sum(r.map((v,j)=>v*XtY[j])));
   const yp=x.map(xi=>a*xi*xi+b*xi+c);
   const r2=calcR2(y,yp);
-  const [seA,seB,seC]=calcSE(Xd,y,yp,3);
-  return{type:'polynomial',a,b,c,seA,seB,seC,r2,yp,
+  const covMatrix=calcCov(Xd,y,yp,3,w,absoluteSigma);
+  const [seA,seB,seC]=covMatrix.map((row,i)=>Math.sqrt(Math.max(0,row[i])));
+  const chi2Info=calcChi2(y,yp,w,3);
+  return{type:'polynomial',a,b,c,seA,seB,seC,r2,yp,chi2Info,
+         covMatrix,jacFn:xi=>[xi*xi,xi,1],
          eq:`y = ${f6(a)}x² + ${f6(b)}x + ${f6(c)}`,
          smooth:xi=>a*xi*xi+b*xi+c};
 }
 
-function doLogarithmic(x,y){
+function doLogarithmic(x,y,w=null,absoluteSigma=false){
   if(x.some(v=>v<=0)) throw new Error("Logaritmická regrese vyžaduje všechny x > 0");
   const lnX=x.map(Math.log);
-  const {a,b}=linRaw(lnX,y);
+  const {a,b}=linRaw(lnX,y,w);
   const yp=x.map(xi=>a*Math.log(Math.max(xi,1e-10))+b);
   const r2=calcR2(y,yp);
   const Xd=x.map(xi=>[Math.log(Math.max(xi,1e-10)),1]);
-  const [seA,seB]=calcSE(Xd,y,yp,2);
-  return{type:'logarithmic',a,b,seA,seB,r2,yp,
+  const covMatrix=calcCov(Xd,y,yp,2,w,absoluteSigma);
+  const [seA,seB]=covMatrix.map((row,i)=>Math.sqrt(Math.max(0,row[i])));
+  const chi2Info=calcChi2(y,yp,w,2);
+  return{type:'logarithmic',a,b,seA,seB,r2,yp,chi2Info,
+         covMatrix,jacFn:xi=>[Math.log(Math.max(xi,1e-10)),1],
          eq:`y = ${f6(a)}·ln(x) + ${f6(b)}`,
          smooth:xi=>a*Math.log(Math.max(xi,1e-10))+b};
 }
 
-function doRational(x,y){
+function doRational(x,y,w=null,absoluteSigma=false){
   if(x.length<3) throw new Error("Lomenná funkce vyžaduje alespoň 3 body.");
   // y = (ax+b)/(cx+1) — 3 parametry, identifikovatelná forma (d=1 fixováno)
   const {a:la,b:lb}=linRaw(x,y);
@@ -124,15 +208,18 @@ function doRational(x,y){
     const d2=denom*denom;
     return[xi/denom, 1/denom, -num*xi/d2];
   };
-  const pOpt=lmFit(x,y,p0,fn,jac,600,1e-10);
+  const pOpt=lmFit(x,y,p0,fn,jac,600,1e-10,w);
   const [a,b,c]=pOpt;
   if(x.some(xi=>Math.abs(c*xi+1)<1e-6))
     throw new Error("Lomenná funkce má pól v oblasti dat — zkus jiný typ regrese.");
   const yp=x.map(xi=>fn(xi,pOpt));
   const r2=calcR2(y,yp);
   const Xd=x.map(xi=>jac(xi,pOpt));
-  const [seA,seB,seC]=calcSE(Xd,y,yp,3);
-  return{type:'rational',a,b,c,seA,seB,seC,r2,yp,
+  const covMatrix=calcCov(Xd,y,yp,3,w,absoluteSigma);
+  const [seA,seB,seC]=covMatrix.map((row,i)=>Math.sqrt(Math.max(0,row[i])));
+  const chi2Info=calcChi2(y,yp,w,3);
+  return{type:'rational',a,b,c,seA,seB,seC,r2,yp,chi2Info,
+         covMatrix,jacFn:xi=>jac(xi,pOpt),
          eq:`y = (${f6(a)}x + ${f6(b)}) / (${f6(c)}x + 1)`,
          smooth:xi=>fn(xi,pOpt)};
 }
@@ -154,16 +241,18 @@ function solveGE(A,b){
   return M.map((row,i)=>row[n]/row[i]);
 }
 
-function lmFit(xd,yd,p0,fn,jac,maxIter=400,tol=1e-10){
+function lmFit(xd,yd,p0,fn,jac,maxIter=400,tol=1e-10,w=null){
   let p=[...p0], lam=0.01;
+  const ww = w || onesW(xd.length);
   const res=p=>xd.map((xi,i)=>yd[i]-fn(xi,p));
-  const sse=p=>res(p).reduce((s,r)=>s+r*r,0);
+  const sse=p=>res(p).reduce((s,r,i)=>s+ww[i]*r*r,0);
   for(let iter=0;iter<maxIter;iter++){
     const r=res(p);
     const J=xd.map(xi=>jac(xi,p));
     const m=p.length;
-    const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>J.reduce((s,j)=>s+j[a]*j[b],0)));
-    const Jtr=Array.from({length:m},(_,a)=>J.reduce((s,j,i)=>s+j[a]*r[i],0));
+    // Vážené normální rovnice: JtWJ, JtWr (standardní vážený Gauss-Newton/LM)
+    const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>J.reduce((s,j,i)=>s+ww[i]*j[a]*j[b],0)));
+    const Jtr=Array.from({length:m},(_,a)=>J.reduce((s,j,i)=>s+ww[i]*j[a]*r[i],0));
     const Alam=JtJ.map((row,i)=>row.map((v,j)=>i===j?v*(1+lam):v));
     let dp; try{dp=solveGE(Alam,Jtr);}catch(e){break;}
     const pNew=p.map((v,i)=>v+dp[i]);
@@ -194,7 +283,7 @@ function inv4(A){
   return M.map(row=>row.slice(n));
 }
 
-function doGaussian(x,y){
+function doGaussian(x,y,w=null,absoluteSigma=false){
   if(x.length<5) throw new Error("Gaussovský fit vyžaduje alespoň 5 bodů.");
   const ymax=Math.max(...y), ymin=Math.min(...y);
   const A0=ymax-ymin;
@@ -210,17 +299,21 @@ function doGaussian(x,y){
     return[e, A*e*(xi-mu)/sig**2, A*e*(xi-mu)**2/sig**3, 1];
   };
 
-  let [A,mu,sig,c]=lmFit(x,y,[A0,mu0,Math.abs(sig0),c0],fn,jac);
+  let [A,mu,sig,c]=lmFit(x,y,[A0,mu0,Math.abs(sig0),c0],fn,jac,400,1e-10,w);
   sig=Math.abs(sig);
   const yp=x.map(xi=>fn(xi,[A,mu,sig,c]));
   const r2=calcR2(y,yp);
 
+  const ww=w||onesW(x.length);
   const Jac=x.map(xi=>jac(xi,[A,mu,sig,c]));
   const m=4, n=x.length;
-  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j)=>s+j[a]*j[b],0)));
-  const s2=yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-m,1);
+  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j,i)=>s+ww[i]*j[a]*j[b],0)));
+  const wsse=yp.reduce((s,ypi,i)=>s+ww[i]*(y[i]-ypi)**2,0);
+  const s2=(absoluteSigma&&w)?1:wsse/Math.max(n-m,1);
   const Cinv=inv4(JtJ);
+  const covMatrix=Cinv?Cinv.map(row=>row.map(v=>v*s2)):Array.from({length:m},()=>Array(m).fill(0));
   const se=Cinv?Cinv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2))):[0,0,0,0];
+  const chi2Info=calcChi2(y,yp,w,m);
 
   const FWHM=2*Math.sqrt(2*Math.log(2))*sig;
   const seFWHM=2*Math.sqrt(2*Math.log(2))*se[2];
@@ -228,7 +321,8 @@ function doGaussian(x,y){
   return{
     type:'gaussian', a:A, b:mu, c:sig, d:c,
     seA:se[0], seB:se[1], seC:se[2], seD:se[3],
-    FWHM, seFWHM, r2, yp,
+    FWHM, seFWHM, r2, yp, chi2Info,
+    covMatrix, jacFn:xi=>jac(xi,[A,mu,sig,c]),
     eq:`y = ${f6(A)}·exp(-(x-${f6(mu)})²/(2·${f6(sig)}²)) + ${f6(c)}`,
     smooth:xi=>fn(xi,[A,mu,sig,c])
   };
@@ -240,11 +334,11 @@ function fourierRow(xi, w, nH){
   return row;
 }
 
-function linearFourierFit(x,y,w,nH){
-  const Xd = x.map(xi=>fourierRow(xi,w,nH));
+function linearFourierFit(x,y,omega,nH,wgt=null){
+  const Xd = x.map(xi=>fourierRow(xi,omega,nH));
   const Xt = matT(Xd);
-  const XtX = matMul(Xt,Xd);
-  const XtY = Xt.map(row=>sum(row.map((v,j)=>v*y[j])));
+  const XtX = wgt ? matMulW(Xt,wgt,Xd) : matMul(Xt,Xd);
+  const XtY = wgt ? matVecW(Xt,wgt,y) : Xt.map(row=>sum(row.map((v,j)=>v*y[j])));
   return solveGE(XtX, XtY); // [a0,a1,b1,a2,b2,a3,b3]
 }
 
@@ -287,7 +381,8 @@ function fourierHarmonicsInfo(nH, coefOrP, seArr){
   return out;
 }
 
-function doFourier(x,y,nH=3,fixedPeriod=null){
+function doFourier(x,y,nH=3,fixedPeriod=null,wArr=null,absoluteSigma=false){
+  const w=wArr; // pole vah (1/sigma_y^2); pozor, uvnitř funkce se `w` NEPOUŽÍVÁ pro úhlovou frekvenci
   if(x.length<2*nH+3) throw new Error(`Fourierova řada (${nH} harm.) vyžaduje alespoň ${2*nH+3} bodů.`);
   const xSpan = Math.max(...x) - Math.min(...x);
   if(xSpan<=0) throw new Error("Fourierova řada vyžaduje rozptýlené x-hodnoty.");
@@ -296,7 +391,7 @@ function doFourier(x,y,nH=3,fixedPeriod=null){
   //    lineárně (amplitudy), žádné hledání frekvence ani LM optimalizace ──
   if(fixedPeriod && isFinite(fixedPeriod) && fixedPeriod>0){
     const omega=2*Math.PI/fixedPeriod;
-    const coef=linearFourierFit(x,y,omega,nH);
+    const coef=linearFourierFit(x,y,omega,nH,w);
     if(coef.some(v=>!isFinite(v))) throw new Error("Fourierova řada se s touto periodou nedá spolehlivě fitovat — zkus jinou hodnotu.");
     const yp=x.map(xi=>{
       const row=fourierRow(xi,omega,nH);
@@ -305,11 +400,13 @@ function doFourier(x,y,nH=3,fixedPeriod=null){
     const r2=calcR2(y,yp);
     const n=x.length, m=coef.length;
     const Xd=x.map(xi=>fourierRow(xi,omega,nH));
-    const XtX=matMul(matT(Xd),Xd);
-    const s2=sum(y.map((v,i)=>(v-yp[i])**2))/Math.max(n-m,1);
+    const XtX=w?matMulW(matT(Xd),w,Xd):matMul(matT(Xd),Xd);
+    const wsse=sum(y.map((v,i)=>(w?w[i]:1)*(v-yp[i])**2));
+    const s2=(absoluteSigma&&w)?1:wsse/Math.max(n-m,1);
     const XtXinv=invertMatrixGJ(XtX);
     const se=XtXinv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2)));
     const covMatrix=XtXinv.map(row=>row.map(v=>v*s2));
+    const chi2Info=calcChi2(y,yp,w,m);
 
     const eqParts=[];
     for(let k=1;k<=nH;k++){
@@ -319,7 +416,7 @@ function doFourier(x,y,nH=3,fixedPeriod=null){
 
     return{
       type:'fourier', nH, params:[...coef, omega], se:[...se, 0],
-      omega, seOmega:0, period:fixedPeriod, sePeriod:0, r2, yp, periodFixed:true,
+      omega, seOmega:0, period:fixedPeriod, sePeriod:0, r2, yp, periodFixed:true, chi2Info,
       harmonics:fourierHarmonicsInfo(nH, coef, se),
       covMatrix, jacFn:xi=>fourierRow(xi,omega,nH),
       periodogram:null,
@@ -342,18 +439,18 @@ function doFourier(x,y,nH=3,fixedPeriod=null){
   const periodogram=[];
   const SStot=sum(y.map(v=>(v-mean(y))**2))||1e-12;
   for(let m=1;m<=mMax;m++){
-    const w = 2*Math.PI*m/xSpan;
+    const omegaCand = 2*Math.PI*m/xSpan;
     let coef;
-    try{ coef=linearFourierFit(x,y,w,nH); }catch(e){ continue; }
+    try{ coef=linearFourierFit(x,y,omegaCand,nH,wArr); }catch(e){ continue; }
     if(coef.some(v=>!isFinite(v))) continue;
     const ypTest=x.map(xi=>{
-      const row=fourierRow(xi,w,nH);
+      const row=fourierRow(xi,omegaCand,nH);
       return sum(row.map((v,j)=>v*coef[j]));
     });
     const sseTest=sum(y.map((v,i)=>(v-ypTest[i])**2));
     const r2Test=1-sseTest/SStot;
-    periodogram.push({period:2*Math.PI/w, r2:r2Test});
-    if(sseTest<bestSSE){ bestSSE=sseTest; bestW=w; bestCoef=coef; }
+    periodogram.push({period:2*Math.PI/omegaCand, r2:r2Test});
+    if(sseTest<bestSSE){ bestSSE=sseTest; bestW=omegaCand; bestCoef=coef; }
   }
   if(!bestCoef) bestCoef=[mean(y), ...Array(2*nH).fill(0)];
   periodogram.sort((a,b)=>a.period-b.period);
@@ -386,18 +483,21 @@ function doFourier(x,y,nH=3,fixedPeriod=null){
     return grad;
   };
 
-  const pOpt=lmFit(x,y,p0,fn,jac,800,1e-12);
+  const pOpt=lmFit(x,y,p0,fn,jac,800,1e-12,wArr);
   const omega=pOpt[pOpt.length-1];
   const yp=x.map(xi=>fn(xi,pOpt));
   const r2=calcR2(y,yp);
 
+  const wwF=wArr||onesW(x.length);
   const m=p0.length, n=x.length;
   const Jac=x.map(xi=>jac(xi,pOpt));
-  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j)=>s+j[a]*j[b],0)));
-  const s2=yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-m,1);
+  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j,i)=>s+wwF[i]*j[a]*j[b],0)));
+  const wsseF=yp.reduce((s,ypi,i)=>s+wwF[i]*(y[i]-ypi)**2,0);
+  const s2=(absoluteSigma&&wArr)?1:wsseF/Math.max(n-m,1);
   const Minv=invertMatrixGJ(JtJ);
   const se=Minv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2)));
   const covMatrix=Minv.map(row=>row.map(v=>v*s2));
+  const chi2Info=calcChi2(y,yp,wArr,m);
 
   const period=2*Math.PI/omega;
   const sePeriod=Math.abs(2*Math.PI/(omega*omega))*se[se.length-1];
@@ -409,7 +509,7 @@ function doFourier(x,y,nH=3,fixedPeriod=null){
   }
 
   return{
-    type:'fourier', nH, params:pOpt, se, omega, seOmega:se[se.length-1], period, sePeriod, r2, yp,
+    type:'fourier', nH, params:pOpt, se, omega, seOmega:se[se.length-1], period, sePeriod, r2, yp, chi2Info,
     harmonics:fourierHarmonicsInfo(nH, pOpt, se),
     covMatrix, jacFn:xi=>jac(xi,pOpt),
     periodogram, bestPeriod:period,
@@ -418,13 +518,13 @@ function doFourier(x,y,nH=3,fixedPeriod=null){
   };
 }
 
-function doFourierAuto(x,y,fixedPeriod=null){
+function doFourierAuto(x,y,fixedPeriod=null,w=null,absoluteSigma=false){
   const n=x.length;
   const maxAllowed=Math.max(1, Math.min(8, Math.floor((n-3)/2)));
   let best=null, bestBIC=Infinity;
   for(let nH=1; nH<=maxAllowed; nH++){
     let res;
-    try{ res=doFourier(x,y,nH,fixedPeriod); }catch(e){ continue; }
+    try{ res=doFourier(x,y,nH,fixedPeriod,w,absoluteSigma); }catch(e){ continue; }
     const k = fixedPeriod ? (1+2*nH) : (1+2*nH+1); // počet odhadovaných parametrů
     const rss = sum(y.map((v,i)=>(v-res.yp[i])**2));
     const bic = n*Math.log(Math.max(rss/n, 1e-12)) + k*Math.log(n);
@@ -434,7 +534,7 @@ function doFourierAuto(x,y,fixedPeriod=null){
   return best;
 }
 
-function doMultiGaussian(x, y, nPeaks){
+function doMultiGaussian(x, y, nPeaks, w=null, absoluteSigma=false){
   if(x.length < 5*nPeaks) throw new Error(`Fit ${nPeaks}× Gauss vyžaduje alespoň ${5*nPeaks} bodů.`);
 
   // Automatický odhad počátečních parametrů — najdi nPeaks lokálních maxim
@@ -483,7 +583,7 @@ function doMultiGaussian(x, y, nPeaks){
     return grad;
   };
 
-  let pOpt=lmFit(x,y,p0,fn,jac,600,1e-10);
+  let pOpt=lmFit(x,y,p0,fn,jac,600,1e-10,w);
   // Zajisti kladná sigma
   for(let k=0;k<nPeaks;k++) pOpt[k*3+2]=Math.abs(pOpt[k*3+2]);
   // Seřaď peaky podle polohy mu
@@ -496,10 +596,13 @@ function doMultiGaussian(x, y, nPeaks){
   const r2=calcR2(y,yp);
 
   // Standardní chyby — numerický Jacobián pro obecnou velikost
+  const ww=w||onesW(x.length);
   const m=p0.length, n=x.length;
   const Jac=x.map(xi=>jac(xi,pOpt));
-  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j)=>s+j[a]*j[b],0)));
-  const s2=yp.reduce((s,ypi,i)=>s+(y[i]-ypi)**2,0)/Math.max(n-m,1);
+  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j,i)=>s+ww[i]*j[a]*j[b],0)));
+  const wsse=yp.reduce((s,ypi,i)=>s+ww[i]*(y[i]-ypi)**2,0);
+  const s2=(absoluteSigma&&w)?1:wsse/Math.max(n-m,1);
+  const chi2Info=calcChi2(y,yp,w,m);
   // Obecná inverze (Gauss-Jordan)
   const Minv=Array.from({length:m},(_,i)=>Array.from({length:m},(_,j)=>i===j?1:0));
   const Mcopy=JtJ.map(r=>[...r]);
@@ -518,6 +621,7 @@ function doMultiGaussian(x, y, nPeaks){
     }
   }
   const se=Minv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2)));
+  const covMatrix=Minv.map(row=>row.map(v=>v*s2));
 
   const FWHMs=peakParams.map((_,k)=>({
     FWHM: 2*Math.sqrt(2*Math.log(2))*pOpt[k*3+2],
@@ -527,7 +631,8 @@ function doMultiGaussian(x, y, nPeaks){
   const eqParts=peakParams.map((_,k)=>`${f6(pOpt[k*3])}·e^(-(x-${f6(pOpt[k*3+1])})²/(2·${f6(pOpt[k*3+2])}²))`).join(' + ');
 
   return{
-    type:`gaussian${nPeaks}`, nPeaks, params:pOpt, se, FWHMs, r2, yp,
+    type:`gaussian${nPeaks}`, nPeaks, params:pOpt, se, FWHMs, r2, yp, chi2Info,
+    covMatrix, jacFn:xi=>jac(xi,pOpt),
     eq:`y = ${eqParts} + ${f6(pOpt[pOpt.length-1])}`,
     eqShort:'fit',
     smooth:xi=>fn(xi,pOpt)
@@ -558,18 +663,18 @@ function buildCustomFitter(formula){
   return {paramNames,fn,jac,node};
 }
 
-function safeSSE(x,y,fn,p){
+function safeSSE(x,y,fn,p,w=null){
   let s=0;
   for(let i=0;i<x.length;i++){
     const yp=fn(x[i],p);
     if(!isFinite(yp)) return Infinity;
     const r=y[i]-yp;
-    s+=r*r;
+    s+=(w?w[i]:1)*r*r;
   }
   return s;
 }
 
-function doCustomFit(x,y,formula,nStarts=15){
+function doCustomFit(x,y,formula,nStarts=15,w=null,absoluteSigma=false){
   const {paramNames,fn,jac}=buildCustomFitter(formula);
   const m=paramNames.length;
   if(x.length<m+1) throw new Error(`Rovnice s ${m} parametry vyžaduje alespoň ${m+1} bodů.`);
@@ -580,49 +685,54 @@ function doCustomFit(x,y,formula,nStarts=15){
   for(let attempt=0;attempt<nStarts;attempt++){
     const pStart=p0.map(v=>attempt===0?v:v*(0.4+rnd()*1.8)*(rnd()<0.15?-1:1));
     let pOpt;
-    try{ pOpt=lmFit(x,y,pStart,fn,jac,800,1e-12); }catch(e){ continue; }
+    try{ pOpt=lmFit(x,y,pStart,fn,jac,800,1e-12,w); }catch(e){ continue; }
     if(pOpt.some(v=>!isFinite(v))) continue;
-    const sse=safeSSE(x,y,fn,pOpt);
+    const sse=safeSSE(x,y,fn,pOpt,w);
     if(sse<bestSSE){ bestSSE=sse; best=pOpt; }
   }
   if(!best) throw new Error('Fit se nepodařilo najít — zkus jednodušší rovnici nebo zkontroluj syntaxi.');
 
   const yp=x.map(xi=>fn(xi,best));
   const r2=calcR2(y,yp);
+  const ww=w||onesW(x.length);
   const n=x.length;
   const Jac=x.map(xi=>jac(xi,best));
-  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j)=>s+j[a]*j[b],0)));
-  const s2=sum(y.map((v,i)=>(v-yp[i])**2))/Math.max(n-m,1);
+  const JtJ=Array.from({length:m},(_,a)=>Array.from({length:m},(_,b)=>Jac.reduce((s,j,i)=>s+ww[i]*j[a]*j[b],0)));
+  const wsse=sum(y.map((v,i)=>ww[i]*(v-yp[i])**2));
+  const s2=(absoluteSigma&&w)?1:wsse/Math.max(n-m,1);
   const Minv=invertMatrixGJ(JtJ);
   const se=Minv.map((row,i)=>Math.sqrt(Math.max(0,row[i]*s2)));
+  const covMatrix=Minv.map(row=>row.map(v=>v*s2));
+  const chi2Info=calcChi2(y,yp,w,m);
 
   return {
-    type:'custom', formula, paramNames, params:best, se, r2, yp,
+    type:'custom', formula, paramNames, params:best, se, r2, yp, chi2Info,
+    covMatrix, jacFn:xi=>jac(xi,best),
     eq:`y = ${formula}`,
     smooth:xi=>fn(xi,best)
   };
 }
 
-function computeFitForType(x, y, type, ds){
-  if(type==='linear')           return doLinear(x,y);
-  if(type==='exponential')      return doExponential(x,y);
-  if(type==='polynomial')       return doPolynomial(x,y);
-  if(type==='logarithmic')      return doLogarithmic(x,y);
-  if(type==='gaussian')         return doGaussian(x,y);
-  if(type==='gaussian2')        return doMultiGaussian(x,y,2);
-  if(type==='gaussian3')        return doMultiGaussian(x,y,3);
-  if(type==='rational')         return doRational(x,y);
+function computeFitForType(x, y, type, ds, w=null, absoluteSigma=false){
+  if(type==='linear')           return doLinear(x,y,w,absoluteSigma);
+  if(type==='exponential')      return doExponential(x,y,w,absoluteSigma);
+  if(type==='polynomial')       return doPolynomial(x,y,w,absoluteSigma);
+  if(type==='logarithmic')      return doLogarithmic(x,y,w,absoluteSigma);
+  if(type==='gaussian')         return doGaussian(x,y,w,absoluteSigma);
+  if(type==='gaussian2')        return doMultiGaussian(x,y,2,w,absoluteSigma);
+  if(type==='gaussian3')        return doMultiGaussian(x,y,3,w,absoluteSigma);
+  if(type==='rational')         return doRational(x,y,w,absoluteSigma);
   if(type==='fourier'){
     if(fourierAutoHarmonics){
-      const r=doFourierAuto(x,y,fourierManualPeriod);
+      const r=doFourierAuto(x,y,fourierManualPeriod,w,absoluteSigma);
       fourierHarmonics=r.nH;
       return r;
     }
-    return doFourier(x,y,fourierHarmonics, fourierManualPeriod);
+    return doFourier(x,y,fourierHarmonics, fourierManualPeriod,w,absoluteSigma);
   }
   if(type==='custom'){
     if(!ds || !ds.customFormula) throw new Error('Nejdřív zadej vlastní rovnici (klikni na "Vlastní rovnice" v nabídce typu regrese).');
-    return doCustomFit(x,y,ds.customFormula);
+    return doCustomFit(x,y,ds.customFormula,15,w,absoluteSigma);
   }
   throw new Error('Neznámý typ regrese.');
 }
