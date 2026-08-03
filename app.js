@@ -776,9 +776,19 @@ function syncAxisLabelsModeUI(){
 // barvou appky (žádný konkrétní dataset totiž není "ten" relevantní).
 function syncAxisLabelsPanelBorder(){
   const panel=document.getElementById('axis-labels-panel');
-  if(!panel) return;
   const ds=datasets[activeDatasetIdx];
-  panel.style.borderColor = axisLabelsApplyAll ? 'var(--border)' : effPointColor(ds, activeDatasetIdx);
+  if(panel) panel.style.borderColor = axisLabelsApplyAll ? 'var(--border)' : effPointColor(ds, activeDatasetIdx);
+  // Rámeček panelu s regresními parametry i jméno aktivní sady dat vedle
+  // nadpisu sledují barvu bodů aktivní sady stejným způsobem — na rozdíl od
+  // popisků os to není podmíněné volbou aktuální/všechny (parametry vždy
+  // patří právě jedné konkrétní sadě, takže "všechny" tu nedává smysl).
+  const resultsPanel=document.getElementById('resultsPanel');
+  if(resultsPanel && ds){
+    const col=effPointColor(ds, activeDatasetIdx);
+    resultsPanel.style.borderColor=col;
+    const nameEl=document.getElementById('results-panel-dsname');
+    if(nameEl){ nameEl.textContent=ds.name||''; nameEl.style.color=col; }
+  }
 }
 
 function setAxisLabelsApplyAll(applyAll){
