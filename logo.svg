@@ -1,5 +1,11 @@
 <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' width='80' height='80'>
-  <rect width='32' height='32' rx='7' fill='#c83030'/>
+  <defs>
+    <linearGradient id='fpLogoGrad' x1='0' y1='0' x2='32' y2='32' gradientUnits='userSpaceOnUse'>
+      <stop offset='0' stop-color='#2f8fd1'/>
+      <stop offset='1' stop-color='#f2793a'/>
+    </linearGradient>
+  </defs>
+  <rect width='32' height='32' rx='7' fill="url(#fpLogoGrad)"/>
   <polyline points='4,26 10,18 16,20 22,10 28,6' fill='none' stroke='white' stroke-width='2.8' stroke-linecap='round' stroke-linejoin='round'/>
   <circle cx='10' cy='18' r='2' fill='white'/>
   <circle cx='16' cy='20' r='2' fill='white'/>
