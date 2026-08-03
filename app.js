@@ -11,6 +11,10 @@ let regressionOn = false;
 let showCI = false;
 let axisLabels = {x:'x', y:'y'};
 let axisLabelsFromFile = false;
+// Když je zapnuto, název osy zadaný v poli "Názvy os" se propíše do VŠECH
+// datasetů (i nově vytvořených tlačítkem "+"), ne jen do právě aktivního —
+// ať uživatel nemusí stejný název opisovat do každé záložky zvlášť.
+let axisLabelsApplyAll = false;
 let manualRange = {active:false, xMin:null, xMax:null, yMin:null, yMax:null}; // true pouze pokud byla detekována hlavička ze souboru
 let combineState = {open:false, enabled:false, expanded:false, op:'+', dsA:null, dsB:null};
 let integralState = {enabled:false, expanded:false, fnKey:null, lo:null, hi:null};
@@ -62,9 +66,51 @@ const POINT_STYLES = [
   {key:'diamond',      label:'Kosočtverec',             icon:'◆', chart:'rectRot',  rotation:0,   sizeMult:1.15}
 ];
 const POINT_STYLE_ICON = Object.fromEntries(POINT_STYLES.map(o=>[o.key,o.icon]));
+const POINT_SIZE_DEFAULT = 6;
 
 function getPointStyleMeta(key){
   return POINT_STYLES.find(o=>o.key===key) || POINT_STYLES[0];
+}
+
+// Efektivní velikost/barva bodu daného datasetu — buď to, co si uživatel
+// ručně nastavil (ds.pointSize/ds.pointColor), nebo výchozí hodnoty appky
+// (základní poloměr POINT_SIZE_DEFAULT, barva podle pořadí v DATASET_COLORS).
+function effPointSize(ds){
+  return (ds && Number.isFinite(ds.pointSize)) ? ds.pointSize : POINT_SIZE_DEFAULT;
+}
+function effPointColor(ds, dsIdx){
+  if(ds && ds.pointColor) return ds.pointColor;
+  return DATASET_COLORS[dsIdx%DATASET_COLORS.length].point;
+}
+
+// Vlastní styl bodu (tvar/velikost/barva) nastavený u kteréhokoli datasetu se
+// ukládá do cache prohlížeče a použije se jako výchozí i pro NOVĚ vytvořené
+// datasety (viz applyPointStylePrefsToNewDataset) — dokud uživatel nezmáčkne
+// tlačítko "výchozí", které cache i aktuální dataset vrátí do původního stavu
+// appky (jeden jednotný tvar bodu, barvy datasetů podle pořadí).
+const POINT_STYLE_PREFS_KEY='regrese_pointStylePrefs';
+function savePointStylePrefs(ds){
+  try{
+    localStorage.setItem(POINT_STYLE_PREFS_KEY, JSON.stringify({
+      pointStyle:ds.pointStyle||'circle', pointSize:ds.pointSize, pointColor:ds.pointColor
+    }));
+  }catch(e){ /* např. soukromý režim — nevadí, jen se to neuloží mezi sezeními */ }
+}
+function loadPointStylePrefs(){
+  try{
+    const raw=localStorage.getItem(POINT_STYLE_PREFS_KEY);
+    return raw ? JSON.parse(raw) : null;
+  }catch(e){ return null; }
+}
+function clearPointStylePrefs(){
+  try{ localStorage.removeItem(POINT_STYLE_PREFS_KEY); }catch(e){ /* nevadí */ }
+}
+function applyPointStylePrefsToNewDataset(ds){
+  const p=loadPointStylePrefs();
+  if(!p) return;
+  if(p.pointStyle) ds.pointStyle=p.pointStyle;
+  if(Number.isFinite(p.pointSize)) ds.pointSize=p.pointSize;
+  if(p.pointColor) ds.pointColor=p.pointColor;
 }
 
 function makeEmptyDataset(name){
@@ -76,7 +122,7 @@ function makeEmptyDataset(name){
     fourierHarmonics:3, fourierAutoHarmonics:true,
     fourierManualPeriodOn:false, fourierManualPeriod:null,
     hiddenSeries:{data:false, excl:false, fit:false, ci:false},
-    customFormula:null, pointStyle:'circle',
+    customFormula:null, pointStyle:'circle', pointSize:null, pointColor:null,
     // Nejistoty jednotlivých bodů (sigma_y) — pro vážený fit (WLS) a χ²/dof.
     // Sloupec σy v tabulce (a ovládání abs/% + hromadné vyplnění) se zobrazí
     // až po zapnutí přepínače sigmaYOn — v základním stavu je tabulka stejná
@@ -182,6 +228,7 @@ function restoreTableRows(rows){
 }
 
 let datasets = [makeEmptyDataset('Data 1')];
+applyPointStylePrefsToNewDataset(datasets[0]);
 let activeDatasetIdx = 0;
 // Klik na záložku sady dat ji "zvýrazní" v grafu (ostatní sady potemní) —
 // null = žádné zvýraznění (všechny sady stejně výrazné). Nastavuje
@@ -193,18 +240,30 @@ function renderTabsUI(){
   if(!wrap) return;
   let html='';
   datasets.forEach((ds,i)=>{
-    const col=DATASET_COLORS[i%DATASET_COLORS.length];
     const label=ds.fileLabel ? `${ds.name}: ${ds.fileLabel}` : ds.name;
     const pStyle=ds.pointStyle||'circle';
+    const size=effPointSize(ds);
+    const color=effPointColor(ds,i);
     html+=`<div class="ds-row">`
         + `<div class="ds-tab${i===activeDatasetIdx?' active':''}${i===highlightedDsIdx?' highlighted':''}" onclick="onDatasetTabClick(${i})" title="${label.replace(/"/g,'&quot;')}">`
-        +   `<span class="ds-dot" style="background:${col.point};"></span>`
+        +   `<span class="ds-dot" id="ds-dot-${i}" style="background:${color};"></span>`
         +   `<span class="ds-label">${label}</span>`
         + `</div>`
         + `<div class="ds-point-wrap">`
-        +   `<button class="ds-point-btn" onclick="event.stopPropagation(); toggleDsPointDropdown(${i})" title="Typ bodu grafu">${POINT_STYLE_ICON[pStyle]||'●'}</button>`
+        +   `<button class="ds-point-btn" onclick="event.stopPropagation(); toggleDsPointDropdown(${i})" title="Typ, velikost a barva bodu grafu">${POINT_STYLE_ICON[pStyle]||'●'}</button>`
         +   `<div class="ds-point-dropdown" id="ds-point-dropdown-${i}">`
         +     POINT_STYLES.map(o=>`<button class="ds-point-option${pStyle===o.key?' selected':''}" onclick="event.stopPropagation(); selectDsPointStyle(${i},'${o.key}')">${o.icon}&nbsp;&nbsp;${o.label}</button>`).join('')
+        +     `<div class="ds-point-sep"></div>`
+        +     `<div class="ds-point-row" onclick="event.stopPropagation()">`
+        +       `<label>Velikost</label>`
+        +       `<input type="range" min="3" max="14" step="1" value="${size}" oninput="setDsPointSize(${i},this.value)">`
+        +       `<span class="ds-point-size-val" id="ds-point-size-val-${i}">${size}</span>`
+        +     `</div>`
+        +     `<div class="ds-point-row" onclick="event.stopPropagation()">`
+        +       `<label>Barva</label>`
+        +       `<input type="color" value="${color}" oninput="setDsPointColor(${i},this.value)">`
+        +     `</div>`
+        +     `<button class="ds-point-reset" onclick="event.stopPropagation(); resetDsPointStyle(${i})">Výchozí (tvar, velikost, barva)</button>`
         +   `</div>`
         + `</div>`
         + `</div>`;
@@ -234,7 +293,78 @@ function toggleDsPointDropdown(idx){
 }
 
 function selectDsPointStyle(idx, style){
-  datasets[idx].pointStyle=style;
+  const ds=datasets[idx];
+  ds.pointStyle=style;
+  savePointStylePrefs(ds);
+  document.querySelectorAll('.ds-point-dropdown.open').forEach(d=>d.classList.remove('open'));
+  renderTabsUI();
+  renderCombinedChart();
+}
+
+// Velikost a barva bodu se mění přes range/color input přímo uvnitř otevřeného
+// dropdownu — NESMÍ se proto volat renderCombinedChart() (ta si na začátku
+// vždy zavolá renderTabsUI(), což přestaví celé innerHTML záložek i s otevřeným
+// dropdownem — posuvník/color input by se za jízdy zničil a menu by "zmizelo").
+// Místo toho jen upravíme vlastnosti už existujících datasetů v živém grafu
+// a zavoláme chart.update('none') — beze zbytečné animace a bez zásahu do DOM
+// mimo samotné plátno grafu.
+function updateDsPointVisualsInChart(idx){
+  if(!chartInst) return;
+  const ds=datasets[idx];
+  const ptMeta=getPointStyleMeta(ds.pointStyle);
+  const ptSize=effPointSize(ds), ptColor=effPointColor(ds,idx);
+  const dim = highlightedDsIdx!==null && highlightedDsIdx!==idx;
+  const a = dim ? 0.15 : 1;
+  chartInst.data.datasets.forEach(d=>{
+    if(d._dsIdx!==idx) return;
+    if(d._kind==='data'){
+      d.backgroundColor=colorWithAlpha(ptColor,a);
+      d.pointRadius=ptSize*ptMeta.sizeMult;
+      d.pointStyle=ptMeta.chart; d.rotation=ptMeta.rotation;
+      // Barva fitu (proložené křivky) a chybových úseček jde s barvou bodů —
+      // ať dataset vždy vypadá jako jedna barevná sada, ne dvě různé.
+      d._errColor=colorWithAlpha(ptColor,a);
+    } else if(d._kind==='excl'){
+      d.borderColor=colorWithAlpha(ptColor,a);
+      d.pointRadius=ptSize*ptMeta.sizeMult;
+      d.pointStyle=ptMeta.chart; d.rotation=ptMeta.rotation;
+    } else if(d._kind==='fit'){
+      d.borderColor=colorWithAlpha(ptColor,a);
+    } else if(d._kind==='ci'){
+      d.borderColor=colorWithAlpha(ptColor,0.4*a);
+      d.backgroundColor=colorWithAlpha(ptColor,0.16*a);
+    }
+  });
+  chartInst.update('none');
+  // Barva ohraničení panelu "Názvy os" (viz syncAxisLabelsPanelBorder) sleduje
+  // barvu bodů AKTIVNÍHO datasetu v režimu "aktuální" — pokud se teď měnila
+  // barva zrovna jeho bodů, ať se panel hned přebarví taky.
+  if(idx===activeDatasetIdx && !axisLabelsApplyAll) syncAxisLabelsPanelBorder();
+}
+
+function setDsPointSize(idx, val){
+  const v=parseInt(val,10);
+  const ds=datasets[idx];
+  ds.pointSize=Number.isFinite(v)?v:null;
+  savePointStylePrefs(ds);
+  const lbl=document.getElementById('ds-point-size-val-'+idx);
+  if(lbl) lbl.textContent=effPointSize(ds);
+  updateDsPointVisualsInChart(idx);
+}
+
+function setDsPointColor(idx, val){
+  const ds=datasets[idx];
+  ds.pointColor=val||null;
+  savePointStylePrefs(ds);
+  const dot=document.getElementById('ds-dot-'+idx);
+  if(dot) dot.style.background=effPointColor(ds,idx);
+  updateDsPointVisualsInChart(idx);
+}
+
+function resetDsPointStyle(idx){
+  const ds=datasets[idx];
+  ds.pointStyle='circle'; ds.pointSize=null; ds.pointColor=null;
+  clearPointStylePrefs();
   document.querySelectorAll('.ds-point-dropdown.open').forEach(d=>d.classList.remove('open'));
   renderTabsUI();
   renderCombinedChart();
@@ -259,15 +389,13 @@ function syncFourierControlsUI(ds){
   if(hLbl) hLbl.textContent=ds.fourierHarmonics;
   const autoTrack=document.getElementById('fourier-auto-track');
   const autoKnob=document.getElementById('fourier-auto-knob');
-  if(autoTrack){ autoTrack.style.background=ds.fourierAutoHarmonics?'#c83030':'var(--btn)';
-    autoTrack.style.borderColor=ds.fourierAutoHarmonics?'#c83030':'var(--border)'; }
+  if(autoTrack){ autoTrack.style.background='var(--btn)'; autoTrack.style.borderColor='var(--border)'; }
   if(autoKnob) autoKnob.style.left=ds.fourierAutoHarmonics?'18px':'1px';
   const pTrack=document.getElementById('fourier-period-track');
   const pKnob=document.getElementById('fourier-period-knob');
   const pRow=document.getElementById('fourier-period-row');
   const pInput=document.getElementById('fourier-period-input');
-  if(pTrack){ pTrack.style.background=ds.fourierManualPeriodOn?'#c83030':'var(--btn)';
-    pTrack.style.borderColor=ds.fourierManualPeriodOn?'#c83030':'var(--border)'; }
+  if(pTrack){ pTrack.style.background='var(--btn)'; pTrack.style.borderColor='var(--border)'; }
   if(pKnob) pKnob.style.left=ds.fourierManualPeriodOn?'18px':'1px';
   if(pRow) pRow.style.display=ds.fourierManualPeriodOn?'flex':'none';
   if(pInput) pInput.value=ds.fourierManualPeriod!=null?ds.fourierManualPeriod:'';
@@ -294,6 +422,7 @@ function loadDatasetSnapshotUI(idx){
   const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
   if(lx) lx.value=ds.xLabel;
   if(ly) ly.value=ds.yLabel;
+  syncAxisLabelsPanelBorder();
   syncRtypeUI(ds.regressionType);
   regressionOn=ds.regressionOn;
   showCI=ds.showCI;
@@ -346,7 +475,10 @@ function onDatasetTabClick(i){
 function addDataset(){
   if(datasets.length>=5) return;
   saveActiveDatasetSnapshot();
-  datasets.push(makeEmptyDataset('Data '+(datasets.length+1)));
+  const newDs=makeEmptyDataset('Data '+(datasets.length+1));
+  applyPointStylePrefsToNewDataset(newDs);
+  if(axisLabelsApplyAll){ newDs.xLabel=axisLabels.x; newDs.yLabel=axisLabels.y; }
+  datasets.push(newDs);
   activeDatasetIdx=datasets.length-1;
   loadDatasetSnapshotUI(activeDatasetIdx);
   initTable();
@@ -388,6 +520,38 @@ function setTheme(choice){
 /* ══════════════════════════════════════════════
    MATH UTILITIES
 ══════════════════════════════════════════════ */
+
+// Sdílený toTex handler pro sazbu mathjs výrazů (eq-bar, náhled vlastní
+// rovnice, popisky v Pokročilém průvodci exportem): symboly s podtržítkem
+// se sázejí jako skutečný dolní index — U_0 → U₀, x_max → x s upright
+// indexem "max", omega_0 → ω₀ — místo výchozího mathjs chování, které
+// podtržítko jen escapuje a vypíše doslova (U\_0).
+const GREEK_TEX_NAMES=new Set([
+  'alpha','beta','gamma','delta','epsilon','zeta','eta','theta','iota','kappa',
+  'lambda','mu','nu','xi','omicron','pi','rho','sigma','tau','upsilon','phi',
+  'chi','psi','omega','Gamma','Delta','Theta','Lambda','Xi','Pi','Sigma',
+  'Upsilon','Phi','Psi','Omega','varepsilon','vartheta','varpi','varrho',
+  'varsigma','varphi'
+]);
+
+function texSubscriptPart(part){
+  if(GREEK_TEX_NAMES.has(part)) return '\\'+part;
+  // víceznakový textový index (max, min, ef, krit…) upright dle konvence;
+  // jednopísmenné indexy (i, j, k…) zůstávají kurzívou jako běžné proměnné
+  if(/^[A-Za-z]{2,}$/.test(part)) return '\\mathrm{'+part+'}';
+  return part;
+}
+
+function texSymbolHandler(node){
+  if(node.isSymbolNode && node.name.includes('_')){
+    const parts=node.name.split('_').filter(p=>p!=='');
+    if(parts.length>=2){
+      const base=GREEK_TEX_NAMES.has(parts[0]) ? '\\'+parts[0] : parts[0];
+      return base+'_{'+parts.slice(1).map(texSubscriptPart).join(',')+'}';
+    }
+  }
+  return undefined;
+}
 
 
 
@@ -562,7 +726,7 @@ function syncSigmaYUI(ds){
   const modeTrack=document.getElementById('sigmay-mode-track');
   const modeKnob=document.getElementById('sigmay-mode-knob');
   const isPct=ds.sigmaYMode==='pct';
-  if(modeTrack){ modeTrack.style.background=isPct?'#c83030':'var(--btn)'; modeTrack.style.borderColor=isPct?'#c83030':'var(--border)'; }
+  if(modeTrack){ modeTrack.style.background='var(--btn)'; modeTrack.style.borderColor='var(--border)'; }
   if(modeKnob) modeKnob.style.left=isPct?'18px':'1px';
   const absLbl=document.getElementById('sigmay-mode-abs-lbl');
   const pctLbl=document.getElementById('sigmay-mode-pct-lbl');
@@ -593,6 +757,56 @@ function setSigmaYMode(mode){
   ds.sigmaYMode = mode==='pct' ? 'pct' : 'abs';
   syncSigmaYUI(ds);
   recomputeKeepVis();
+}
+
+// Přepínač "aktuální dataset / všechny datasety" u polí Názvy os (viz komentář
+// u axisLabelsApplyAll výše) — čistě UI stav, neukládá se do projektu ani cache.
+function syncAxisLabelsModeUI(){
+  const knob=document.getElementById('axis-labels-mode-knob');
+  if(knob) knob.style.left=axisLabelsApplyAll?'16px':'1px';
+  const curLbl=document.getElementById('axis-labels-mode-cur-lbl');
+  const allLbl=document.getElementById('axis-labels-mode-all-lbl');
+  if(curLbl){ curLbl.style.color=axisLabelsApplyAll?'var(--text-muted)':'var(--accent)'; curLbl.style.fontWeight=axisLabelsApplyAll?'400':'700'; }
+  if(allLbl){ allLbl.style.color=axisLabelsApplyAll?'var(--accent)':'var(--text-muted)'; allLbl.style.fontWeight=axisLabelsApplyAll?'700':'400'; }
+}
+
+// Ohraničení celého panelu "Názvy os" (viz .axis-labels-panel) barevně
+// sleduje aktivní dataset — v režimu "aktuální" barvou jeho bodů (stejně
+// jako fit/CI, viz effPointColor), v režimu "všechny" jednou neutrální
+// barvou appky (žádný konkrétní dataset totiž není "ten" relevantní).
+function syncAxisLabelsPanelBorder(){
+  const panel=document.getElementById('axis-labels-panel');
+  if(!panel) return;
+  const ds=datasets[activeDatasetIdx];
+  panel.style.borderColor = axisLabelsApplyAll ? 'var(--border)' : effPointColor(ds, activeDatasetIdx);
+}
+
+function setAxisLabelsApplyAll(applyAll){
+  applyAll=!!applyAll;
+  const wasApplyAll=axisLabelsApplyAll;
+  if(applyAll===wasApplyAll){ syncAxisLabelsModeUI(); syncAxisLabelsPanelBorder(); return; }
+  axisLabelsApplyAll=applyAll;
+  if(axisLabelsApplyAll){
+    // Přepnutí NA "všechny" hned zpětně dorovná i datasety, které už existují —
+    // ať nemusí uživatel po přepnutí ještě jednou přepsat pole, aby se to projevilo.
+    datasets.forEach(ds=>{ ds.xLabel=axisLabels.x; ds.yLabel=axisLabels.y; });
+  } else {
+    // Přepnutí ZPĚT na "aktuální" vrátí VŠEM datasetům výchozí "x"/"y" —
+    // sdílený název byl jen dočasná věc pro režim "všechny", ne trvalá
+    // hodnota, kterou by si měl každý dataset dál nést samostatně.
+    datasets.forEach(ds=>{ ds.xLabel='x'; ds.yLabel='y'; });
+    axisLabels.x='x'; axisLabels.y='y';
+    const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
+    if(lx) lx.value='x';
+    if(ly) ly.value='y';
+  }
+  syncAxisLabelsModeUI();
+  syncAxisLabelsPanelBorder();
+  if(chartInst){ if(regressionOn) computeRegression(); else showPointsOnly(); }
+}
+
+function toggleAxisLabelsApplyAll(){
+  setAxisLabelsApplyAll(!axisLabelsApplyAll);
 }
 
 // Hromadně vyplní sloupec σy pro všechny neprázdné (x i y zadané) řádky
@@ -639,7 +853,7 @@ function getSessionState(){
       showCI:ds.showCI,
       hiddenSeries:ds.hiddenSeries||{data:false,excl:false,fit:false,ci:false},
       customFormula:ds.customFormula||null,
-      pointStyle:ds.pointStyle||'circle',
+      pointStyle:ds.pointStyle||'circle', pointSize:ds.pointSize||null, pointColor:ds.pointColor||null,
       sigmaYOn:!!ds.sigmaYOn, sigmaYMode:ds.sigmaYMode||'abs'
     })),
     tools:{
@@ -741,6 +955,8 @@ function applySessionState(state){
     hiddenSeries:Object.assign({data:false,excl:false,fit:false,ci:false}, d.hiddenSeries||{}),
     customFormula:d.customFormula||null,
     pointStyle:d.pointStyle||'circle',
+    pointSize:Number.isFinite(d.pointSize)?d.pointSize:null,
+    pointColor:d.pointColor||null,
     sigmaYOn:!!d.sigmaYOn, sigmaYMode:d.sigmaYMode==='pct'?'pct':'abs'
   }));
   activeDatasetIdx=Math.min(Math.max(state.activeDatasetIdx||0,0), datasets.length-1);
@@ -874,8 +1090,8 @@ function toggleFourierAutoHarmonics(){
   const knob=document.getElementById('fourier-auto-knob');
   const slider=document.getElementById('fourier-harmonics-slider');
   if(track){
-    track.style.background=fourierAutoHarmonics?'#c83030':'var(--btn)';
-    track.style.borderColor=fourierAutoHarmonics?'#c83030':'var(--border)';
+    track.style.background='var(--btn)';
+    track.style.borderColor='var(--border)';
   }
   if(knob) knob.style.left=fourierAutoHarmonics?'18px':'1px';
   if(slider){
@@ -894,8 +1110,8 @@ function toggleFourierManualPeriod(){
   const track=document.getElementById('fourier-period-track');
   const knob=document.getElementById('fourier-period-knob');
   const row=document.getElementById('fourier-period-row');
-  if(track) track.style.background=fourierManualPeriodOn?'#c83030':'var(--btn)';
-  if(track) track.style.borderColor=fourierManualPeriodOn?'#c83030':'var(--border)';
+  if(track) track.style.background='var(--btn)';
+  if(track) track.style.borderColor='var(--border)';
   if(knob) knob.style.left=fourierManualPeriodOn?'18px':'1px';
   if(row) row.style.display=fourierManualPeriodOn?'flex':'none';
   if(!fourierManualPeriodOn){
@@ -914,14 +1130,8 @@ function setFourierPeriod(val){
 }
 
 function updateFourierUI(isFourier){
-  const box=document.getElementById('chartBox');
-  if(box) box.classList.toggle('fourier-active', isFourier);
   const panel=document.getElementById('fourier-settings');
   if(panel) panel.style.display=isFourier?'flex':'none';
-  ['tblWrap','resultsPanel','eqBar','graph-zoom-panel','topBar'].forEach(id=>{
-    const el=document.getElementById(id);
-    if(el) el.classList.toggle('fourier-active', isFourier);
-  });
 }
 
 /* ══════════════════════════════════════════════
@@ -962,7 +1172,7 @@ function updateCustomFormulaPreview(){
   }
   try{
     const node=math.parse(raw);
-    const tex='y = '+node.toTex();
+    const tex='y = '+node.toTex({handler:texSymbolHandler});
     katex.render(tex, preview, {throwOnError:true, displayMode:false});
     if(err) err.style.display='none';
   }catch(e){
@@ -1340,7 +1550,7 @@ function updateGeneralEq(){
   } else if(type==='custom'){
     const ds=datasets[activeDatasetIdx];
     if(ds && ds.customFormula){
-      try{ tex='y = '+math.parse(ds.customFormula).toTex(); }
+      try{ tex='y = '+math.parse(ds.customFormula).toTex({handler:texSymbolHandler}); }
       catch(e){ tex='y = '+ds.customFormula; }
     } else {
       tex='\\text{(zadej vlastní rovnici)}';
@@ -1536,7 +1746,8 @@ function resultToTex(r){
           const idx=r.paramNames.indexOf(node2.name);
           return n(r.params[idx]);
         }
-        return undefined;
+        // ostatní symboly (x, případné konstanty s podtržítkem) — indexy
+        return texSymbolHandler(node2);
       };
       return 'y = '+node.toTex({handler});
     }catch(e){
@@ -1866,7 +2077,7 @@ function combineGeneralTexPart(ds){
   }
   if(type==='custom'){
     if(ds.customFormula){
-      try{ return math.parse(ds.customFormula).toTex(); }
+      try{ return math.parse(ds.customFormula).toTex({handler:texSymbolHandler}); }
       catch(e){ return ds.customFormula; }
     }
     return '?';
@@ -2520,6 +2731,7 @@ function renderCombinedChart(){
   refreshCombinePanelOptions();
   refreshIntegralPanel();
   refreshDerivativePanel();
+  syncAxisLabelsPanelBorder();
   if(chartInst){chartInst.destroy();chartInst=null;}
 
   const activeDatasets=datasets
@@ -2533,12 +2745,13 @@ function renderCombinedChart(){
   const combinedDatasets=[];
 
   activeDatasets.forEach(({ds,i})=>{
-    const col=DATASET_COLORS[i%DATASET_COLORS.length];
     const suffix=multi ? ` (${ds.name})` : '';
     const {x,y,excl,lastResult:result}=ds;
     if(!ds.hiddenSeries) ds.hiddenSeries={data:false,excl:false,fit:false,ci:false};
 
     const ptMeta=getPointStyleMeta(ds.pointStyle);
+    const ptSize=effPointSize(ds);
+    const ptColor=effPointColor(ds,i);
 
     // Klik na záložku sady (highlightedDsIdx) zesvětlí ostatní sady v grafu,
     // aby vynikla ta zvýrazněná — barvy se jen "naředí" nižší průhledností,
@@ -2550,9 +2763,9 @@ function renderCombinedChart(){
       combinedDatasets.push({
         type:'scatter',label:`Vyloučeno${suffix} (${excl.length})`,
         data:excl.map(p=>({x:p[0],y:p[1]})),
-        backgroundColor:'transparent',borderColor:colorWithAlpha(col.excl,a),
+        backgroundColor:'transparent',borderColor:colorWithAlpha(ptColor,a),
         pointStyle:ptMeta.chart,rotation:ptMeta.rotation,
-        pointRadius:6*ptMeta.sizeMult,pointBorderWidth:2,order:3,
+        pointRadius:ptSize*ptMeta.sizeMult,pointBorderWidth:2,order:3,
         _dsIdx:i,_kind:'excl',hidden:!!ds.hiddenSeries.excl
       });
     }
@@ -2561,13 +2774,13 @@ function renderCombinedChart(){
       combinedDatasets.push({
         type:'scatter',label:`Data${suffix}`,
         data:x.map((xi,idx)=>({x:xi,y:y[idx]})),
-        backgroundColor:colorWithAlpha(col.point,a),borderColor:colorWithAlpha('rgba(255,255,255,.7)',a),
-        borderWidth:1.5,pointRadius:6*ptMeta.sizeMult,order:3,
+        backgroundColor:colorWithAlpha(ptColor,a),borderColor:colorWithAlpha('rgba(255,255,255,.7)',a),
+        borderWidth:1.5,pointRadius:ptSize*ptMeta.sizeMult,order:3,
         pointStyle:ptMeta.chart,rotation:ptMeta.rotation,
         _dsIdx:i,_kind:'data',hidden:!!ds.hiddenSeries.data,
         // Chybové úsečky (σy) — kreslí je vlastní Chart.js plugin errorBarsPlugin
         // (viz níže), aby fungovaly i bez externí knihovny pro error bary.
-        _errSy:ds.sy, _errMode:ds.sigmaYMode, _errColor:colorWithAlpha(col.fit,a)
+        _errSy:ds.sy, _errMode:ds.sigmaYMode, _errColor:colorWithAlpha(ptColor,a)
       });
     }
 
@@ -2582,7 +2795,7 @@ function renderCombinedChart(){
       combinedDatasets.push({
         type:'line',label:`fit${suffix}`,
         data:xSmooth.map((xi,k)=>({x:xi,y:ySmooth[k]})),
-        borderColor:colorWithAlpha(col.fit,a),borderWidth:2.5,
+        borderColor:colorWithAlpha(ptColor,a),borderWidth:2.5,
         pointRadius:0,fill:false,tension:0,order:2,
         _dsIdx:i,_kind:'fit',hidden:!!ds.hiddenSeries.fit
       });
@@ -2593,7 +2806,7 @@ function renderCombinedChart(){
         combinedDatasets.push({
           type:'line',label:`IS 95 %${suffix}`,
           data:ci.upper,
-          borderColor:colorWithAlpha(col.ciBorder,a),backgroundColor:colorWithAlpha(col.ciBg,a),
+          borderColor:colorWithAlpha(ptColor,0.4*a),backgroundColor:colorWithAlpha(ptColor,0.16*a),
           borderWidth:1,borderDash:[4,3],
           pointRadius:0,fill:'+1',tension:0,order:4,
           pointStyle:'rect',_ciPairId:i,_dsIdx:i,_kind:'ci',hidden:!!ds.hiddenSeries.ci
@@ -2601,7 +2814,7 @@ function renderCombinedChart(){
         combinedDatasets.push({
           type:'line',label:`_ciLower${suffix}`,
           data:ci.lower,
-          borderColor:colorWithAlpha(col.ciBorder,a),backgroundColor:colorWithAlpha(col.ciBg,a),
+          borderColor:colorWithAlpha(ptColor,0.4*a),backgroundColor:colorWithAlpha(ptColor,0.16*a),
           borderWidth:1,borderDash:[4,3],
           pointRadius:0,fill:false,tension:0,order:5,
           _ciPairId:i,_dsIdx:i,_kind:'ci',hidden:!!ds.hiddenSeries.ci
@@ -2657,7 +2870,6 @@ function renderCombinedChart(){
   }
 
   const c=chartColors();
-  const activeLabels=datasets[activeDatasetIdx];
   const ctx=document.getElementById('myChart').getContext('2d');
   chartInst=new Chart(ctx,{
     type:'scatter',
@@ -2670,12 +2882,12 @@ function renderCombinedChart(){
            grid:{color:c.grid},
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
-           title:{display:true,text:activeLabels.xLabel,color:c.tick,font:{family:'Sora',size:12}}},
+           title:{display:true,text:axisLabels.x,color:c.tick,font:{family:'Sora',size:12}}},
         y:{type:'linear',...getScaleOpts('y'),...(errorBarAxisLock||{}),...(derivativeAxisLock||{}),
            grid:{color:c.grid},
            ticks:{color:c.tick,font:{family:'Fira Code',size:11}},
            border:{color:c.axis},
-           title:{display:true,text:activeLabels.yLabel,color:c.tick,font:{family:'Sora',size:12}}}
+           title:{display:true,text:axisLabels.y,color:c.tick,font:{family:'Sora',size:12}}}
       },
       plugins:{
         legend:{
@@ -2731,19 +2943,33 @@ function renderCombinedChart(){
 /* ══════════════════════════════════════════════
    FILE IMPORT
 ══════════════════════════════════════════════ */
+// Jednotné a jednoduché pravidlo pro oba způsoby načtení (tlačítko i
+// drag&drop): přesně 2 sloupce se vloží rovnou, JAKÝKOLI vícesloupcový
+// soubor vždy otevře Průvodce vložením dat — uživatel si tam sloupce
+// (včetně případného σy) vybere sám. Žádná automatická detekce, žádné
+// hádání, co který sloupec znamená.
 function loadFile(input){
   const file=input.files[0];
   if(!file) return;
-  const lbl=document.getElementById('file-label');
-  if(lbl){
-    lbl.innerHTML='<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/></svg> '+escapeHtmlAttr(file.name);
-    lbl.style.display='block';
-  }
-  datasets[activeDatasetIdx].fileLabel=file.name;
-  renderTabsUI();
   input.value='';
   const reader=new FileReader();
-  reader.onload=e=>{ parseAndFill(e.target.result); };
+  reader.onload=e=>{
+    const text=e.target.result;
+    const parsed=advParse(text);
+    const needsWizard=parsed && parsed.rows.length && Math.max(...parsed.rows.map(r=>r.length))>2;
+    if(needsWizard){
+      openAdvWizardWithText(text, file.name);
+      return;
+    }
+    const lbl=document.getElementById('file-label');
+    if(lbl){
+      lbl.innerHTML='<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><path d="M14 2v6h6"/></svg> '+escapeHtmlAttr(file.name);
+      lbl.style.display='block';
+    }
+    datasets[activeDatasetIdx].fileLabel=file.name;
+    renderTabsUI();
+    parseAndFill(text);
+  };
   reader.readAsText(file);
 }
 
@@ -2751,19 +2977,12 @@ function parseAndFill(text, fileName){
   const lines=text.split(/\r?\n/).map(l=>l.trim()).filter(l=>l&&!l.startsWith('#'));
   if(!lines.length) return false;
 
-  function splitLine(line){
-    if(line.includes('\t'))  return line.split('\t').map(s=>s.trim());
-    if(line.includes(';'))   return line.split(';').map(s=>s.trim());
-    // Mezery mají přednost před čárkou: v "1,5 2,3" je čárka desetinný
-    // oddělovač (české zvyklosti), ne oddělovač sloupců — dělit podle čárky
-    // by data potichu rozbilo. Čárkou se dělí jen řádek bez mezer ("1.5,2.3").
-    if(/\s/.test(line))      return line.split(/\s+/).filter(s=>s!=='');
-    if(line.includes(','))   return line.split(',').map(s=>s.trim());
-    return [line];
-  }
-
+  // Dělení řádku na sloupce sdílí advSplitLine s Průvodcem vložením dat
+  // i drag&drop importem — jedna jediná implementace, aby se detekce
+  // oddělovačů (tab/středník/mezera/čárka, česká desetinná čárka) nikdy
+  // nemohla mezi jednotlivými cestami načítání rozjet.
   let headerX='x', headerY='y', dataStart=0;
-  const firstParts=splitLine(lines[0]);
+  const firstParts=advSplitLine(lines[0]);
   if(firstParts.length>=2 && (isNaN(firstParts[0].replace(',','.')) || isNaN(firstParts[1].replace(',','.')))){
     headerX=firstParts[0]||'x';
     headerY=firstParts[1]||'y';
@@ -2771,13 +2990,14 @@ function parseAndFill(text, fileName){
   }
   axisLabels={x:headerX, y:headerY};
   axisLabelsFromFile = (dataStart === 1);
+  if(axisLabelsApplyAll) datasets.forEach(ds=>{ ds.xLabel=axisLabels.x; ds.yLabel=axisLabels.y; });
   const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
   if(lx) lx.value=axisLabels.x;
   if(ly) ly.value=axisLabels.y;
 
   const rows=[];
   for(let i=dataStart;i<lines.length;i++){
-    const parts=splitLine(lines[i]);
+    const parts=advSplitLine(lines[i]);
     if(parts.length<2) continue;
     const xv=parseFloat(parts[0].replace(',','.'));
     const yv=parseFloat(parts[1].replace(',','.'));
@@ -2794,13 +3014,17 @@ function parseAndFill(text, fileName){
 
   rows.forEach(([xv,yv],i)=>{
     const tr=document.createElement('tr');
+    // sigmaTdHtml: když je zapnutý sloupec σy, musí ho dostat i řádky
+    // z načteného souboru — jinak by tabulka měla nestejný počet buněk
+    // (hlavička 5 sloupců, data 4) a σy by u nich nešlo vůbec zadat.
     tr.innerHTML=`
       <td class="row-num">${i+1}</td>
       <td><input type="checkbox" checked onchange="autoRecompute()"></td>
       <td><input class="cell" type="text" value="${xv}" data-r="${i}" data-c="x"
                  onkeydown="handleKey(event,${i},'x')" oninput="autoRecompute()"></td>
       <td><input class="cell" type="text" value="${yv}" data-r="${i}" data-c="y"
-                 onkeydown="handleKey(event,${i},'y')" oninput="autoRecompute()"></td>`;
+                 onkeydown="handleKey(event,${i},'y')" oninput="autoRecompute()"></td>
+      ${sigmaTdHtml(i, '')}`;
     tb.appendChild(tr);
   });
   addRow();
@@ -3146,35 +3370,47 @@ function saveData(){
   const tb=document.getElementById('tbody');
   const lx=document.getElementById('label-x')?.value.trim()||'x';
   const ly=document.getElementById('label-y')?.value.trim()||'y';
+  // Se zapnutým sloupcem σy se nejistoty ukládají jako třetí sloupec —
+  // jinak by se zadané σy při uložení dat do TXT potichu ztratily.
+  const withSigma=sigmaYActive();
   const rows=[];
   for(let i=0;i<tb.rows.length;i++){
     const xv=tb.rows[i].cells[2]?.querySelector('input')?.value.trim().replace(',','.');
     const yv=tb.rows[i].cells[3]?.querySelector('input')?.value.trim().replace(',','.');
     if(!xv||!yv) continue;
     const xf=parseFloat(xv), yf=parseFloat(yv);
-    if(!isNaN(xf)&&!isNaN(yf)) rows.push(`${xv}\t${yv}`);
+    if(isNaN(xf)||isNaN(yf)) continue;
+    if(withSigma){
+      const sv=tb.rows[i].cells[4]?.querySelector('input')?.value.trim().replace(',','.')||'';
+      rows.push(sv!=='' && !isNaN(parseFloat(sv)) ? `${xv}\t${yv}\t${sv}` : `${xv}\t${yv}`);
+    } else {
+      rows.push(`${xv}\t${yv}`);
+    }
   }
   if(!rows.length){ alert('Tabulka neobsahuje žádná data.'); return; }
-  const content=`${lx}\t${ly}\n`+rows.join('\n');
+  const content=`${lx}\t${ly}${withSigma?'\tsigma_y':''}\n`+rows.join('\n');
   const a=document.createElement('a');
   a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(content);
   a.download='data.txt';
   a.click();
 }
 
-function swapXY(){
+// Vlastní prohození dat (a volitelně i názvů os) — společné jádro pro
+// všechny cesty z swapXY() níže.
+function doSwapXY(swapLabels){
   const tb=document.getElementById('tbody');
   for(let i=0;i<tb.rows.length;i++){
     const xI=tb.rows[i].cells[2].querySelector('input');
     const yI=tb.rows[i].cells[3].querySelector('input');
     [xI.value,yI.value]=[yI.value,xI.value];
   }
-  // Vždy prohodit popisky os
-  [axisLabels.x, axisLabels.y]=[axisLabels.y, axisLabels.x];
-  axisLabelsFromFile=true;
-  const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
-  if(lx) lx.value=axisLabels.x;
-  if(ly) ly.value=axisLabels.y;
+  if(swapLabels){
+    [axisLabels.x, axisLabels.y]=[axisLabels.y, axisLabels.x];
+    axisLabelsFromFile=true;
+    const lx=document.getElementById('label-x'), ly=document.getElementById('label-y');
+    if(lx) lx.value=axisLabels.x;
+    if(ly) ly.value=axisLabels.y;
+  }
   // Prohodit rozsahy os
   const rxMin=document.getElementById('range-xmin');
   const rxMax=document.getElementById('range-xmax');
@@ -3188,6 +3424,41 @@ function swapXY(){
   [manualRange.xMin,manualRange.yMin]=[manualRange.yMin,manualRange.xMin];
   [manualRange.xMax,manualRange.yMax]=[manualRange.yMax,manualRange.xMax];
   recomputeKeepVis();
+}
+
+// Prohodit x↔y: v režimu "aktuální" rovnou prohodí data i názvy os (jako
+// vždycky). V režimu "všechny" jsou ale názvy os sdílené všemi datasety —
+// tichým prohozením by se změnily i ostatním. Proto se místo toho zobrazí
+// dialog (viz #swapxy-labels-overlay) a uživatel si vybere, co přesně chce.
+function swapXY(){
+  if(axisLabelsApplyAll){
+    const ov=document.getElementById('swapxy-labels-overlay');
+    if(ov){ ov.style.display='flex'; document.body.style.overflow='hidden'; return; }
+    // fallback (overlay chybí, např. ve starém HTML): chovej se jako dřív
+  }
+  doSwapXY(true);
+}
+
+function cancelSwapXYChoice(){
+  const ov=document.getElementById('swapxy-labels-overlay');
+  if(ov) ov.style.display='none';
+  document.body.style.overflow='';
+}
+
+function resolveSwapXYChoice(choice){
+  cancelSwapXYChoice();
+  if(choice==='detach-and-swap'){
+    // VÝJIMKA z běžného chování setAxisLabelsApplyAll(false): názvy os se
+    // NEresetují na výchozí "x"/"y" — každý dataset si ponechá názvy, které
+    // měl z režimu "všechny" (ostatní beze změny, aktivní je vzápětí prohodí).
+    axisLabelsApplyAll=false;
+    syncAxisLabelsModeUI();
+    syncAxisLabelsPanelBorder();
+    doSwapXY(true);
+  } else if(choice==='swap-data-only'){
+    // Režim "všechny" zůstává zapnutý, názvy os se nemění — prohodí se jen data.
+    doSwapXY(false);
+  }
 }
 
 function clearData(){
@@ -3407,8 +3678,8 @@ function saveGraphSVG(){
   if(!lastResult || !lastData || !chartInst){ alert('Nejprve proveďte regresi.'); return; }
   const {x,y,excl}=lastData, result=lastResult;
   const activeDs=datasets[activeDatasetIdx];
-  const col=DATASET_COLORS[activeDatasetIdx%DATASET_COLORS.length];
   const ptMeta=getPointStyleMeta(activeDs.pointStyle);
+  const ptSize=effPointSize(activeDs), ptColor=effPointColor(activeDs,activeDatasetIdx);
 
   // Zjisti viditelnost jednotlivých sérií aktivního datasetu přímo podle
   // metadat v živém grafu (_dsIdx/_kind) — spolehlivé i s více sadami dat,
@@ -3458,11 +3729,11 @@ function saveGraphSVG(){
     const lPts=ci.lower.filter(p=>isFinite(p.y)).map(clip).reverse();
     if(uPts.length>1){
       const poly=[...uPts,...lPts].map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-      svg+=`<polygon points="${poly}" fill="${col.ciBg}"/>`;
+      svg+=`<polygon points="${poly}" fill="${colorWithAlpha(ptColor,0.16)}"/>`;
       const du=uPts.map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
       const dl=lPts.slice().reverse().map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-      svg+=`<path d="${du}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
-      svg+=`<path d="${dl}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
+      svg+=`<path d="${du}" fill="none" stroke="${colorWithAlpha(ptColor,0.4)}" stroke-width="1" stroke-dasharray="4,3"/>`;
+      svg+=`<path d="${dl}" fill="none" stroke="${colorWithAlpha(ptColor,0.4)}" stroke-width="1" stroke-dasharray="4,3"/>`;
     }
   }
 
@@ -3470,20 +3741,20 @@ function saveGraphSVG(){
     const pts=xSmooth.map((xi,i)=>[xi,ySmooth[i]]).filter(p=>isFinite(p[1]));
     if(pts.length){
       const d=pts.map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
-      svg+=`<path d="${d}" fill="none" stroke="${col.fit}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+      svg+=`<path d="${d}" fill="none" stroke="${ptColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
     }
   }
 
   if(dataVisible){
     const sy=activeDs.sy||[], sigmaYMode=activeDs.sigmaYMode;
-    x.forEach((xi,i)=>{ svg+=svgShape(ptMeta.key, px(xi), py(y[i]), 6, col.point, 'rgba(0,0,0,0.25)', 1.5); });
+    x.forEach((xi,i)=>{ svg+=svgShape(ptMeta.key, px(xi), py(y[i]), ptSize, ptColor, 'rgba(0,0,0,0.25)', 1.5); });
     x.forEach((xi,i)=>{
       const sigma=pointSigmaAbs(sy[i], sigmaYMode, y[i]);
-      if(sigma!=null) svg+=svgErrorBar(px, py, xi, y[i], sigma, col.fit, mt, ph);
+      if(sigma!=null) svg+=svgErrorBar(px, py, xi, y[i], sigma, ptColor, mt, ph);
     });
   }
   if(exclVisible){
-    excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), 6, 'none', col.excl, 2); });
+    excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), ptSize, 'none', ptColor, 2); });
   }
 
   svg+=`</svg>`;
@@ -3522,8 +3793,8 @@ function saveGraphAllSVG(){
   svg+=svgIntegralArea(px,py,ml,mt,pw,ph);
 
   activeDatasetsList.forEach(({ds,i})=>{
-    const col=DATASET_COLORS[i%DATASET_COLORS.length];
     const ptMeta=getPointStyleMeta(ds.pointStyle);
+    const ptSize=effPointSize(ds), ptColor=effPointColor(ds,i);
     const {x,y,excl,lastResult:result}=ds;
 
     const findVis=kind=>{
@@ -3551,11 +3822,11 @@ function saveGraphAllSVG(){
       const lPts=ci.lower.filter(p=>isFinite(p.y)).map(clip).reverse();
       if(uPts.length>1){
         const poly=[...uPts,...lPts].map(p=>`${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-        svg+=`<polygon points="${poly}" fill="${col.ciBg}"/>`;
+        svg+=`<polygon points="${poly}" fill="${colorWithAlpha(ptColor,0.16)}"/>`;
         const du=uPts.map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
         const dl=lPts.slice().reverse().map((p,j)=>`${j===0?'M':'L'}${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' ');
-        svg+=`<path d="${du}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
-        svg+=`<path d="${dl}" fill="none" stroke="${col.ciBorder}" stroke-width="1" stroke-dasharray="4,3"/>`;
+        svg+=`<path d="${du}" fill="none" stroke="${colorWithAlpha(ptColor,0.4)}" stroke-width="1" stroke-dasharray="4,3"/>`;
+        svg+=`<path d="${dl}" fill="none" stroke="${colorWithAlpha(ptColor,0.4)}" stroke-width="1" stroke-dasharray="4,3"/>`;
       }
     }
 
@@ -3563,20 +3834,20 @@ function saveGraphAllSVG(){
       const pts=xSmooth.map((xi,k)=>[xi,ySmooth[k]]).filter(p=>isFinite(p[1]));
       if(pts.length){
         const d=pts.map((p,j)=>`${j===0?'M':'L'}${px(p[0]).toFixed(1)},${py(p[1]).toFixed(1)}`).join(' ');
-        svg+=`<path d="${d}" fill="none" stroke="${col.fit}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+        svg+=`<path d="${d}" fill="none" stroke="${ptColor}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>`;
       }
     }
 
     if(dataVisible){
       const sy=ds.sy||[], sigmaYMode=ds.sigmaYMode;
-      x.forEach((xi,k)=>{ svg+=svgShape(ptMeta.key, px(xi), py(y[k]), 6, col.point, 'rgba(0,0,0,0.25)', 1.5); });
+      x.forEach((xi,k)=>{ svg+=svgShape(ptMeta.key, px(xi), py(y[k]), ptSize, ptColor, 'rgba(0,0,0,0.25)', 1.5); });
       x.forEach((xi,k)=>{
         const sigma=pointSigmaAbs(sy[k], sigmaYMode, y[k]);
-        if(sigma!=null) svg+=svgErrorBar(px, py, xi, y[k], sigma, col.fit, mt, ph);
+        if(sigma!=null) svg+=svgErrorBar(px, py, xi, y[k], sigma, ptColor, mt, ph);
       });
     }
     if(exclVisible){
-      excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), 6, 'none', col.excl, 2); });
+      excl.forEach(([xi,yi])=>{ svg+=svgShape(ptMeta.key, px(xi), py(yi), ptSize, 'none', ptColor, 2); });
     }
   });
 
@@ -3805,66 +4076,14 @@ function advSetField(group,key,value){
   renderAdvExportPreview();
 }
 
-// TeX režim se nezapíná jen zaškrtnutím — otevře se editor, kde se popisek
-// píše přímo v LaTeX syntaxi (viz openAdvTexEditor), s live náhledem.
-let advTexEditingGroup=null;
+// Přepínač "vysázet jako rovnici": pole zůstává obyčejný textový input,
+// jen se jeho obsah interpretuje jako matematický výraz ve stejné syntaxi
+// jako vlastní regresní rovnice a v náhledu/exportu se vysází KaTeXem
+// (viz buildLabelHtml). Žádný oddělený editor se neotvírá.
 function advToggleTex(group,checked){
   const obj=advResolveFieldGroup(group);
   if(!obj) return;
   obj.tex=checked;
-  renderAdvExportPanel();
-  renderAdvExportPreview();
-  if(checked) openAdvTexEditor(group);
-}
-function openAdvTexEditor(group){
-  const obj=advResolveFieldGroup(group);
-  if(!obj) return;
-  advTexEditingGroup=group;
-  const titles={title:'TeX text — Záhlaví', xLabel:'TeX text — Popisek osy X', yLabel:'TeX text — Popisek osy Y'};
-  const titleEl=document.getElementById('adv-tex-title');
-  if(titleEl) titleEl.textContent = titles[group] || (group.startsWith('legend:') ? 'TeX text — položka legendy' : 'TeX text');
-  const input=document.getElementById('adv-tex-input');
-  input.value=obj.text||'';
-  document.getElementById('adv-tex-overlay').style.display='flex';
-  updateAdvTexPreview();
-  input.focus();
-}
-function closeAdvTexEditor(){
-  // Zavření bez potvrzení nechává TeX režim zapnutý s posledním potvrzeným textem —
-  // jestli ho uživatel ještě nikdy nepotvrdil, vrátí přepínač zpátky na obyčejný text.
-  const closeObj=advTexEditingGroup ? advResolveFieldGroup(advTexEditingGroup) : null;
-  if(closeObj && !closeObj.text){
-    closeObj.tex=false;
-    renderAdvExportPanel();
-    renderAdvExportPreview();
-  }
-  document.getElementById('adv-tex-overlay').style.display='none';
-  advTexEditingGroup=null;
-}
-function updateAdvTexPreview(){
-  if(!advTexEditingGroup) return;
-  const preview=document.getElementById('adv-tex-preview');
-  const raw=document.getElementById('adv-tex-input').value;
-  if(!raw.trim()){ preview.innerHTML='<span style="color:var(--text-muted);font-size:13px;">Náhled se zobrazí tady…</span>'; return; }
-  try{
-    const html=buildLabelHtml(raw);
-    if(!html || !html.trim()){
-      preview.innerHTML='<span style="color:#c83030;font-size:13px;">Neplatný TeX výraz</span>';
-      return;
-    }
-    preview.innerHTML=`<div style="font-family:'Sora',sans-serif;font-size:18px;color:var(--text);">${html}</div>`;
-  }catch(e){
-    preview.innerHTML='<span style="color:#c83030;font-size:13px;">Neplatný TeX výraz</span>';
-  }
-}
-function confirmAdvTexEditor(){
-  if(!advTexEditingGroup) return;
-  const obj=advResolveFieldGroup(advTexEditingGroup);
-  if(!obj) return;
-  const raw=document.getElementById('adv-tex-input').value;
-  obj.text=raw;
-  advTexEditingGroup=null;
-  document.getElementById('adv-tex-overlay').style.display='none';
   renderAdvExportPanel();
   renderAdvExportPreview();
 }
@@ -3903,16 +4122,14 @@ function advAlignButtonsHtml(group, cfg){
   return `<div style="display:flex;gap:6px;margin-top:6px;">${btn('center','Zarovnat na střed')}${btn('edge','Zarovnat na okraj')}</div>`;
 }
 
-// Buď obyčejné textové pole (běžný popisek), nebo — je-li zapnutý TeX režim —
-// tlačítko, které otevře editor s LaTeX syntaxí a živým náhledem.
+// Textové pole popisku — v režimu "vysázet jako rovnici" se jen přepne
+// vzhled (monospace + nápovědný placeholder se syntaxí vlastní rovnice),
+// pořád je to ale obyčejný input; sazbu ukazuje živý náhled vlevo.
 function advTextFieldControl(group, cfg, placeholder){
   if(cfg.tex){
-    const preview=cfg.text ? escapeXml(cfg.text.length>34 ? cfg.text.slice(0,34)+'…' : cfg.text) : '(prázdné)';
-    return `<button type="button" class="adv-tex-edit-btn" onclick="openAdvTexEditor('${group}')"
-      style="width:100%;box-sizing:border-box;text-align:left;background:var(--btn);color:var(--text);border:1px dashed var(--border);
-             border-radius:7px;padding:7px 9px;font-family:'Fira Code',monospace;font-size:11.5px;cursor:pointer;">
-      ✎ <span style="opacity:.75;">${preview}</span>
-    </button>`;
+    return `<input type="text" placeholder="např. U_0*sin(2*pi*x/T)" value="${escapeHtmlAttr(cfg.text)}"
+      style="font-family:'Fira Code',monospace;"
+      oninput="advSetField('${group}','text',this.value)">`;
   }
   return `<input type="text" placeholder="${placeholder||''}" value="${escapeHtmlAttr(cfg.text)}" oninput="advSetField('${group}','text',this.value)">`;
 }
@@ -3954,7 +4171,7 @@ function renderAdvExportPanel(){
       </div>
       <div class="adv-ds-grid">
         ${advTextFieldControl('legend:'+key, cfg, 'Text položky')}
-        <label class="adv-checkbox"><input type="checkbox" ${cfg.tex?'checked':''} onchange="advToggleTex('legend:${key}',this.checked)" style="margin-right:6px;"> TeX režim</label>
+        <label class="adv-checkbox"><input type="checkbox" ${cfg.tex?'checked':''} onchange="advToggleTex('legend:${key}',this.checked)" style="margin-right:6px;"> vysázet jako rovnici <span style="opacity:.6;font-size:10.5px;">(zápis jako u vlastní rovnice)</span></label>
       </div>
     </div>`;
   }).join('') || '<div class="adv-hint">V grafu nejsou žádné viditelné položky legendy.</div>';
@@ -3965,20 +4182,20 @@ function renderAdvExportPanel(){
       <label class="adv-checkbox"><input type="checkbox" ${st.title.show?'checked':''} onchange="advSetField('title','show',this.checked)" style="margin-right:6px;"> Zobrazit záhlaví</label>
       ${advTextFieldControl('title', st.title, 'Text záhlaví')}
       <label>Velikost písma<input type="range" min="10" max="40" value="${st.title.fontSize}" oninput="advSetField('title','fontSize',parseFloat(this.value))"></label>
-      <label class="adv-checkbox"><input type="checkbox" ${st.title.tex?'checked':''} onchange="advToggleTex('title',this.checked)" style="margin-right:6px;"> TeX režim</label>
+      <label class="adv-checkbox"><input type="checkbox" ${st.title.tex?'checked':''} onchange="advToggleTex('title',this.checked)" style="margin-right:6px;"> vysázet jako rovnici <span style="opacity:.6;font-size:10.5px;">(zápis jako u vlastní rovnice)</span></label>
     </div>
     <div class="adv-section">
       <div class="adv-section-title">Popisek osy X</div>
       ${advTextFieldControl('xLabel', st.xLabel, 'Text osy X')}
       <label>Velikost písma<input type="range" min="8" max="26" value="${st.xLabel.fontSize}" oninput="advSetField('xLabel','fontSize',parseFloat(this.value))"></label>
-      <label class="adv-checkbox"><input type="checkbox" ${st.xLabel.tex?'checked':''} onchange="advToggleTex('xLabel',this.checked)" style="margin-right:6px;"> TeX režim</label>
+      <label class="adv-checkbox"><input type="checkbox" ${st.xLabel.tex?'checked':''} onchange="advToggleTex('xLabel',this.checked)" style="margin-right:6px;"> vysázet jako rovnici <span style="opacity:.6;font-size:10.5px;">(zápis jako u vlastní rovnice)</span></label>
       ${advAlignButtonsHtml('xLabel', st.xLabel)}
     </div>
     <div class="adv-section">
       <div class="adv-section-title">Popisek osy Y</div>
       ${advTextFieldControl('yLabel', st.yLabel, 'Text osy Y')}
       <label>Velikost písma<input type="range" min="8" max="26" value="${st.yLabel.fontSize}" oninput="advSetField('yLabel','fontSize',parseFloat(this.value))"></label>
-      <label class="adv-checkbox"><input type="checkbox" ${st.yLabel.tex?'checked':''} onchange="advToggleTex('yLabel',this.checked)" style="margin-right:6px;"> TeX režim</label>
+      <label class="adv-checkbox"><input type="checkbox" ${st.yLabel.tex?'checked':''} onchange="advToggleTex('yLabel',this.checked)" style="margin-right:6px;"> vysázet jako rovnici <span style="opacity:.6;font-size:10.5px;">(zápis jako u vlastní rovnice)</span></label>
       ${advAlignButtonsHtml('yLabel', st.yLabel)}
     </div>
     <div class="adv-section">
@@ -4017,92 +4234,6 @@ function renderAdvExportPanel(){
   `;
 }
 
-// Text (i \emph{}/\textbf{}/textove symboly) resime VLASTNIM parserem a
-// vykreslujeme jako normalni HTML pres <foreignObject> (prohlizec umi
-// libovolnou diakritiku/unicode bezchybne) — pres KaTeX posilame JEN to, co
-// je uvnitr $...$, protoze tam KaTeX dava skutecnou pridanou hodnotu
-// (zlomky, exponenty, symboly jako \AA/\S apod).
-const TEX_TEXT_SYMBOLS={
-  '\\AA':'Å','\\aa':'å','\\ss':'ß','\\O':'Ø','\\o':'ø','\\L':'Ł','\\l':'ł',
-  '\\S':'§','\\P':'¶','\\dag':'†','\\ddag':'‡','\\copyright':'©','\\pounds':'£',
-  '\\ldots':'…','\\dots':'…','\\slash':'/',
-  '\\%':'%','\\&':'&','\\#':'#','\\_':'_','\\$':'$','\\{':'{','\\}':'}',
-  '\\ ':' ','\\,':' ','\\;':' ','\\quad':'  ','\\qquad':'    '
-};
-
-// Miniaturni parser LaTeXoveho "textoveho modu" - rozseka vstup na behy
-// {text, italic, bold, math}. Podporuje \emph{}/\textit{}/\textbf{}, stare
-// \bf/\it/\rm uvnitr {} skupiny, prepnuti do matematiky pres $...$ a bezne
-// textove symboly (\AA, \S, \% ...). Neznamy prikaz se radsi vypise jako
-// citelny text, nez aby appka spadla na chybu.
-const TEX_BLANK_STYLE={italic:false, bold:false, mono:false, smallcaps:false, underline:false};
-function parseTexRuns(raw){
-  const runs=[];
-  function pushText(str, style){
-    if(str) runs.push({text:str, italic:!!style.italic, bold:!!style.bold, mono:!!style.mono,
-      smallcaps:!!style.smallcaps, underline:!!style.underline, math:false});
-  }
-  function parse(str, style){
-    let j=0, buf='';
-    while(j<str.length){
-      const ch=str[j];
-      if(ch==='$'){
-        const end=str.indexOf('$', j+1);
-        if(end<0){ buf+=ch; j++; continue; }
-        pushText(buf, style); buf='';
-        runs.push({text:str.slice(j+1,end), italic:false, bold:false, mono:false, smallcaps:false, underline:false, math:true});
-        j=end+1; continue;
-      }
-      if(ch==='\\'){
-        const m=str.slice(j).match(/^\\([a-zA-Z]+)/);
-        if(m){
-          const cmd=m[1];
-          let k=j+1+cmd.length;
-          while(str[k]===' ') k++;
-          if(str[k]==='{'){
-            let depth=1, e=k+1;
-            while(e<str.length && depth>0){ if(str[e]==='{') depth++; else if(str[e]==='}') depth--; e++; }
-            const inner=str.slice(k+1,e-1);
-            pushText(buf, style); buf='';
-            if(cmd==='emph'||cmd==='textit'||cmd==='it') parse(inner, {...style, italic:true});
-            else if(cmd==='textbf'||cmd==='bf') parse(inner, {...style, bold:true});
-            else if(cmd==='texttt'||cmd==='ttfamily') parse(inner, {...style, mono:true});
-            else if(cmd==='textsc'||cmd==='scshape') parse(inner, {...style, smallcaps:true});
-            else if(cmd==='underline'||cmd==='uline') parse(inner, {...style, underline:true});
-            else if(cmd==='textrm'||cmd==='rmfamily'||cmd==='textup'||cmd==='upshape') parse(inner, {...style, italic:false});
-            else if(cmd==='textnormal'||cmd==='textsf'||cmd==='sffamily') parse(inner, style);
-            else parse(inner, style);
-            j=e; continue;
-          }
-          const token='\\'+cmd;
-          if(TEX_TEXT_SYMBOLS[token]!==undefined){ buf+=TEX_TEXT_SYMBOLS[token]; j=k; continue; }
-          if(cmd==='bf'){ style={...style,bold:true}; j=k; continue; }
-          if(cmd==='it'||cmd==='sl'){ style={...style,italic:true}; j=k; continue; }
-          if(cmd==='tt'){ style={...style,mono:true}; j=k; continue; }
-          if(cmd==='sc'){ style={...style,smallcaps:true}; j=k; continue; }
-          if(cmd==='rm'||cmd==='normalfont'||cmd==='upshape'){ style={...TEX_BLANK_STYLE}; j=k; continue; }
-          buf+=cmd; j=k; continue;
-        } else {
-          const token=str.slice(j,j+2);
-          if(TEX_TEXT_SYMBOLS[token]!==undefined){ buf+=TEX_TEXT_SYMBOLS[token]; j+=2; continue; }
-          buf+=str[j+1]||''; j+=2; continue;
-        }
-      }
-      if(ch==='{'){
-        let depth=1, e=j+1;
-        while(e<str.length && depth>0){ if(str[e]==='{') depth++; else if(str[e]==='}') depth--; e++; }
-        pushText(buf, style); buf='';
-        parse(str.slice(j+1,e-1), {...style});
-        j=e; continue;
-      }
-      if(ch==='}'){ j++; continue; }
-      buf+=ch; j++;
-    }
-    pushText(buf, style);
-  }
-  parse(raw||'', {...TEX_BLANK_STYLE});
-  return runs;
-}
 
 // Zmeri skutecnou sirku textu pres skryty SVG <text> - spolehlivejsi nez
 // odhad podle poctu znaku, funguje pro libovolny font-style/font-weight.
@@ -4209,45 +4340,16 @@ function advMeasureHtmlBox(html, fontSizePx){
   return {width:r.width, height:r.height};
 }
 
-// Poskladá behy z parseTexRuns do jednoho HTML retezce - textove behy jako
-// obycejny (pripadne <b>/<i>) text, matematicke behy pres skutecny KaTeX
-// (katex.renderToString), ktery ma mnohem sirsi a spolehlivejsi pokryti
-// prikazu/symbolu/akcentu nez rucni aproximace.
-function texRunsToHtml(runs){
-  return runs.map(r=>{
-    if(r.math){
-      try{ return katex.renderToString(r.text, {throwOnError:false, displayMode:false, strict:false, output:'html'}); }
-      catch(e){ return `<span style="color:#c83030;">$${escapeXml(r.text)}$</span>`; }
-    }
-    let html=escapeXml(r.text);
-    if(r.mono) html=`<span style="font-family:'Fira Code',monospace;">${html}</span>`;
-    if(r.smallcaps) html=`<span style="font-variant-caps:small-caps;">${html}</span>`;
-    if(r.underline) html=`<u>${html}</u>`;
-    if(r.bold && r.italic) html=`<b><i>${html}</i></b>`;
-    else if(r.bold) html=`<b>${html}</b>`;
-    else if(r.italic) html=`<i>${html}</i>`;
-    return html;
-  }).join('');
-}
-
-// Vrati HTML pro libovolny TeX text popisku:
-//  * cely text obaleny v $$...$$ = jedna samostatna display rovnice (KaTeX)
-//  * cely text obaleny v jednom paru $...$ = jedna samostatna inline rovnice (KaTeX)
-//  * cokoliv jineho = smiseny text/matematika podle parseTexRuns (bezne
-//    LaTeXove chovani - text vzprimeny, \emph{}/\textbf{} funguji, $...$
-//    prepina do matematiky)
+// Vrátí vysázené HTML pro popisek v "režimu rovnice": vstup je matematický
+// výraz ve STEJNÉ syntaxi jako vlastní regresní rovnice (mathjs — např.
+// U_0*sin(2*pi*x/T) nebo a*x^2+b) a vysází se stejně, jako se sází rovnice
+// v pruhu pod grafem (math.parse(...).toTex() → KaTeX, output:'html').
+// Neplatný výraz vyhodí výjimku — volající spadnou na obyčejný text.
 function buildLabelHtml(rawText){
-  const raw=rawText||'';
-  const trimmed=raw.trim();
-  try{
-    if(trimmed.startsWith('$$') && trimmed.endsWith('$$') && trimmed.length>=4){
-      return katex.renderToString(trimmed.slice(2,-2).trim(), {throwOnError:false, displayMode:true, strict:false, output:'html'});
-    }
-    if(trimmed.startsWith('$') && trimmed.endsWith('$') && trimmed.length>=2 && !trimmed.slice(1,-1).includes('$')){
-      return katex.renderToString(trimmed.slice(1,-1).trim(), {throwOnError:false, displayMode:false, strict:false, output:'html'});
-    }
-  }catch(e){ /* spadni na obecny parser nize */ }
-  return texRunsToHtml(parseTexRuns(raw));
+  const raw=(rawText||'').trim();
+  if(!raw) return '';
+  const tex=math.parse(raw).toTex({handler:texSymbolHandler});
+  return katex.renderToString(tex, {throwOnError:true, displayMode:false, strict:false, output:'html'});
 }
 
 // Vykresli popisek bud jako obycejny <text>, nebo (je-li zapnuty TeX mod)
@@ -4746,44 +4848,118 @@ function closePeriodogram(){
   document.body.style.overflow='';
 }
 
+// Rezidua se dají zobrazit absolutně (naměřeno − fit, jednotky y), nebo —
+// když jsou u aktivního datasetu zadané nejistoty σy — normovaně jako
+// (naměřeno − fit)/σy v jednotkách σ. Normovaný pohled je standardní
+// diagnostika váženého fitu: body mimo ±2σ jsou podezřelé, |rezidua| by
+// zhruba ze 2/3 měla ležet do ±1σ (proto vodicí čáry ±1σ a ±2σ).
+let residualsNormalized=false;
+
+function residualsSigmaAvailable(ds){
+  if(!ds || !ds.sigmaYOn || !Array.isArray(ds.sy)) return false;
+  // aspoň jeden bod s platnou σy>0 — jen pro ty jde normované reziduum spočítat
+  return ds.x.some((xi,i)=>pointSigmaAbs(ds.sy[i], ds.sigmaYMode, ds.y[i])!=null);
+}
+
+function setResidualsNormalized(norm){
+  residualsNormalized=!!norm;
+  renderResidualsChart();
+}
+function toggleResidualsNormalized(){
+  setResidualsNormalized(!residualsNormalized);
+}
+
 function openResiduals(){
   const overlay=document.getElementById('residuals-overlay');
-  const canvas=document.getElementById('residuals-canvas');
   overlay.style.display='flex';
   document.body.style.overflow='hidden';
+  renderResidualsChart();
+}
 
-  const r=lastFourierResult;
+function renderResidualsChart(){
+  const canvas=document.getElementById('residuals-canvas');
+  const ds=datasets[activeDatasetIdx];
+  const r=ds ? ds.lastResult : null;
   if(residualsChart){ residualsChart.destroy(); residualsChart=null; }
+
+  const hasSigma=residualsSigmaAvailable(ds);
+  if(!hasSigma) residualsNormalized=false;
+  const norm=residualsNormalized;
+
+  // Přepínač absolutní / v jednotkách σ se ukazuje jen, když σy dává smysl
+  const modeRow=document.getElementById('residuals-mode-row');
+  if(modeRow) modeRow.style.display=hasSigma?'flex':'none';
+  const knob=document.getElementById('residuals-mode-knob');
+  if(knob) knob.style.left=norm?'16px':'1px';
+  const absLbl=document.getElementById('residuals-mode-abs-lbl');
+  const normLbl=document.getElementById('residuals-mode-norm-lbl');
+  if(absLbl){ absLbl.style.color=norm?'var(--text-muted)':'var(--accent)'; absLbl.style.fontWeight=norm?'400':'700'; }
+  if(normLbl){ normLbl.style.color=norm?'var(--accent)':'var(--text-muted)'; normLbl.style.fontWeight=norm?'700':'400'; }
+  const desc=document.getElementById('residuals-desc');
+  if(desc) desc.textContent = norm
+    ? 'Rezidua normovaná na nejistotu: (naměřeno − fit)/σy. Zhruba 2/3 bodů by měly ležet v pásu ±1σ, body mimo ±2σ jsou podezřelé.'
+    : 'Rozdíly (naměřeno − fit) pro každý bod. Náhodný rozptyl kolem nuly bez vzoru značí dobrý fit.';
+
   if(!r || !r.yp){ return; }
 
-  const {x,y}=getTableData();
-  const resid=x.map((xi,i)=>({x:xi,y:y[i]-r.yp[i]}));
+  const x=ds.x, y=ds.y, sy=ds.sy||[];
+  const resid=[];
+  x.forEach((xi,i)=>{
+    if(i>=r.yp.length) return;
+    const d=y[i]-r.yp[i];
+    if(norm){
+      const sigma=pointSigmaAbs(sy[i], ds.sigmaYMode, y[i]);
+      if(sigma!=null) resid.push({x:xi, y:d/sigma});
+    } else {
+      resid.push({x:xi, y:d});
+    }
+  });
+  if(!resid.length) return;
+
   const xMin=Math.min(...x), xMax=Math.max(...x);
   const c=chartColors();
+  const ptColor=effPointColor(ds, activeDatasetIdx);
+
+  const chartDatasets=[
+    {
+      label:norm?'rezidua / σy':'rezidua',
+      data:resid,
+      backgroundColor:ptColor,borderColor:'rgba(255,255,255,.7)',borderWidth:1.5,pointRadius:5
+    },
+    {
+      type:'line',label:'nula',
+      data:[{x:xMin,y:0},{x:xMax,y:0}],
+      borderColor:'rgba(200,48,48,.6)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,fill:false
+    }
+  ];
+  if(norm){
+    // Vodicí čáry ±1σ a ±2σ — jen orientační, bez položky v legendě by ale
+    // nebylo jasné, co jsou zač, proto σ pásy dostávají popisky.
+    [[1,'±1σ','rgba(120,120,140,.55)'],[2,'±2σ','rgba(120,120,140,.3)']].forEach(([k,label,color])=>{
+      chartDatasets.push({
+        type:'line',label:label,
+        data:[{x:xMin,y:k},{x:xMax,y:k}],
+        borderColor:color,borderWidth:1,borderDash:[3,4],pointRadius:0,fill:false
+      });
+      chartDatasets.push({
+        type:'line',label:'_'+label+'dolni',
+        data:[{x:xMin,y:-k},{x:xMax,y:-k}],
+        borderColor:color,borderWidth:1,borderDash:[3,4],pointRadius:0,fill:false
+      });
+    });
+  }
 
   residualsChart=new Chart(canvas.getContext('2d'), {
     type:'scatter',
-    data:{
-      datasets:[
-        {
-          label:'rezidua',
-          data:resid,
-          backgroundColor:'#4a9eff',borderColor:'rgba(255,255,255,.7)',borderWidth:1.5,pointRadius:5
-        },
-        {
-          type:'line',label:'nula',
-          data:[{x:xMin,y:0},{x:xMax,y:0}],
-          borderColor:'rgba(200,48,48,.6)',borderWidth:1.5,borderDash:[6,4],pointRadius:0,fill:false
-        }
-      ]
-    },
+    data:{ datasets:chartDatasets },
     options:{
       responsive:true,maintainAspectRatio:false,
       scales:{
         x:{type:'linear',title:{display:true,text:axisLabels.x,color:c.text},ticks:{color:c.text},grid:{color:c.grid}},
-        y:{title:{display:true,text:'naměřeno − fit',color:c.text},ticks:{color:c.text},grid:{color:c.grid}}
+        y:{title:{display:true,text:norm?'(naměřeno − fit) / σy':'naměřeno − fit',color:c.text},ticks:{color:c.text},grid:{color:c.grid}}
       },
-      plugins:{legend:{labels:{color:c.text,usePointStyle:true,pointStyle:'circle'}}}
+      plugins:{legend:{labels:{color:c.text,usePointStyle:true,pointStyle:'circle',
+        filter:item=>!String(item.text).startsWith('_')}}}
     }
   });
 }
@@ -4794,13 +4970,16 @@ function closeResiduals(){
 }
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeNavod(); });
+document.addEventListener('keydown', e => {
+  if(e.key==='Escape'){
+    const ov=document.getElementById('swapxy-labels-overlay');
+    if(ov && ov.style.display==='flex') cancelSwapXYChoice();
+  }
+});
 
-// Escape zavírá i Pokročilý průvodce exportem (nejdřív vnořený TeX editor,
-// pak samotný průvodce) — stejné chování jako klik mimo okno.
+// Escape zavírá i Pokročilý průvodce exportem — stejné chování jako klik mimo okno.
 document.addEventListener('keydown', e => {
   if(e.key!=='Escape') return;
-  const texOv=document.getElementById('adv-tex-overlay');
-  if(texOv && texOv.style.display==='flex'){ closeAdvTexEditor(); return; }
   const expOv=document.getElementById('adv-export-overlay');
   if(expOv && expOv.style.display==='flex') closeAdvancedExportWizard();
 });
@@ -5233,3 +5412,5 @@ function advConfirm(){
 applyTheme(false);
 initTable();
 updateGeneralEq();
+syncAxisLabelsModeUI();
+syncAxisLabelsPanelBorder();

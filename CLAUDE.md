@@ -7,8 +7,10 @@ poznámky k údržbě, aby se nezapomněly mezi sezeními.
 
 „Regresní analýza" — čistě statická webová appka (HTML/CSS/JS, bez build kroku)
 pro regresní analýzu v prohlížeči, pro studenty. Autor Šimon Svoboda. Otevírá se
-i přímo ze souboru (file://), počítej s tím. Verze se zobrazuje v index.html
-(hledej `v2.5.` u `.app-title`) — **při každé změně povýšit o setinku**.
+i přímo ze souboru (file://), počítej s tím. Appka se jmenuje **FastPlot**
+(logo s textem je base64 PNG v hlavičce, class `app-logo`). Verze se zobrazuje
+v index.html (hledej `v1.0.` u `.app-title`) — **při každé změně povýšit
+o setinku** (v1.0.0 → v1.0.1 → …).
 
 ## KRITICKÉ pravidlo: style.css ↔ style-embed.js
 
