@@ -498,7 +498,7 @@ function applyTheme(rerender){
          : themeChoice === 'dark';
   document.documentElement.dataset.theme = isDark ? 'dark' : 'light';
   const thumb=document.getElementById('theme-thumb');
-  if(thumb) thumb.style.left = isDark ? '31px' : '3px';
+  if(thumb) thumb.style.left = isDark ? '21px' : '3px';
   if(rerender && chartInst){
     const vis = chartInst.data.datasets.map((_,i)=>chartInst.isDatasetVisible(i));
     if(regressionOn) computeRegression(); else showPointsOnly();
