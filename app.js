@@ -472,6 +472,122 @@ function onDatasetTabClick(i){
   else switchDataset(i);
 }
 
+// Najde nejbližší nafitovanou křivku (dataset._kind==='fit') POD KURZOREM,
+// bráno jako spojitá čára — ne jednotlivé vzorky, viz níže. Nerozlišuje, jestli
+// je kurzor náhodou i nad datovým bodem, to řeší až findInteractiveChartTarget.
+//
+// Pozor: Chart.js "index" mód hledá u KAŽDÉHO datasetu prvek se stejným
+// pořadovým indexem, ne stejnou hodnotou x — to sedí jen když mají všechny
+// datasety stejně dlouhé a zarovnané pole dat. Křivka fitu je ale vzorkovaná
+// na desítky/stovky bodů (xSmooth), zatímco naměřených bodů je jen pár, takže
+// index-based hledání dávalo pro křivku nesmyslně vzdálený bod a klik na
+// křivku pak byl nespolehlivý/cukal. Místo toho křivku bereme jako spojitou
+// čáru: z klikntého x (přes škálu) lineárně interpolujeme y mezi dvěma
+// sousedními vzorky té které křivky — na počtu/hustotě jejích vzorků tak
+// vůbec nezáleží.
+const FIT_LINE_CLICK_PX = 10;
+function findFitCurveDatasetAtEvent(evt, chart){
+  const xScale=chart.scales?.x, yScale=chart.scales?.y;
+  if(!xScale || !yScale) return null;
+  const xVal=xScale.getValueForPixel(evt.x);
+  if(!Number.isFinite(xVal)) return null;
+  let bestIdx=null, bestDist=Infinity;
+  chart.data.datasets.forEach((ds, di)=>{
+    if(!ds || ds._kind!=='fit' || ds._dsIdx===undefined) return;
+    if(!chart.isDatasetVisible(di)) return;
+    const pts=ds.data;
+    if(!Array.isArray(pts) || pts.length<2) return;
+    for(let k=0;k<pts.length-1;k++){
+      const a=pts[k], b=pts[k+1];
+      if(a==null || b==null) continue;
+      if(!((a.x<=xVal && xVal<=b.x) || (b.x<=xVal && xVal<=a.x))) continue;
+      const t=(b.x===a.x) ? 0 : (xVal-a.x)/(b.x-a.x);
+      const yVal=a.y+(b.y-a.y)*t;
+      if(!Number.isFinite(yVal)) break;
+      const pxY=yScale.getPixelForValue(yVal);
+      const dist=Math.abs(pxY-evt.y);
+      if(dist<bestDist){ bestDist=dist; bestIdx=ds._dsIdx; }
+      break;
+    }
+  });
+  return (bestIdx!==null && bestDist<=FIT_LINE_CLICK_PX) ? bestIdx : null;
+}
+
+// Zjistí, na co kurzor v grafu přesně míří — sdíleno mezi klikem (akce) a
+// hoverem (jen kurzor pointer). Datový/vyloučený bod má vždy přednost před
+// křivkou (mají skutečný hit-radius, takže "intersect:true" nad nimi
+// spolehlivě zabere) — jinak by u dobrého fitu (bod ~na křivce) šlo o klik na
+// bod skoro nemožné, protože by pořád "chytala" křivka pod ním.
+function findInteractiveChartTarget(evt, chart){
+  if(evt.x===undefined || evt.x===null || evt.y===undefined || evt.y===null) return null;
+  const pointHits=chart.getElementsAtEventForMode(evt, 'nearest', {intersect:true, axis:'xy'}, false);
+  for(const it of pointHits){
+    const ds=chart.data.datasets[it.datasetIndex];
+    if(ds && (ds._kind==='data' || ds._kind==='excl') && ds._dsIdx!==undefined){
+      return {type:'point', dsIdx:ds._dsIdx, kind:ds._kind, seriesIndex:it.index};
+    }
+  }
+  const fitDsIdx=findFitCurveDatasetAtEvent(evt, chart);
+  return (fitDsIdx!==null) ? {type:'fit', dsIdx:fitDsIdx} : null;
+}
+
+// Najde index řádku v ds.tableRows odpovídající K-tému bodu dané série
+// (data/vyloučeno) — pořadí uvnitř série přesně odpovídá pořadí filtrovaných
+// řádků v extractXYFromRows (stejné podmínky přeskočení prázdných/neplatných).
+function findTableRowIndexForSeriesPoint(ds, kind, seriesIndex){
+  let count=-1;
+  for(let i=0;i<ds.tableRows.length;i++){
+    const r=ds.tableRows[i];
+    const xv=String(r.x||'').trim().replace(',','.');
+    const yv=String(r.y||'').trim().replace(',','.');
+    if(!xv||!yv) continue;
+    if(isNaN(parseFloat(xv))||isNaN(parseFloat(yv))) continue;
+    const included=!!r.checked;
+    if((kind==='data')===included){
+      count++;
+      if(count===seriesIndex) return i;
+    }
+  }
+  return -1;
+}
+
+// Klik na datový (i vyloučený) bod v grafu: přepne na příslušnou sadu (pokud
+// není už aktivní) a v tabulce na daný řádek upozorní krátkým probliknutím
+// barvou dané sady, ať je hned vidět, který konkrétní řádek to je.
+function jumpToDatasetPoint(dsIdx, kind, seriesIndex){
+  if(dsIdx<0 || dsIdx>=datasets.length) return;
+  if(dsIdx!==activeDatasetIdx) onDatasetTabClick(dsIdx);
+  const ds=datasets[dsIdx];
+  const rowIdx=findTableRowIndexForSeriesPoint(ds, kind, seriesIndex);
+  if(rowIdx<0) return;
+  const tb=document.getElementById('tbody');
+  const tr=tb && tb.children[rowIdx];
+  if(!tr) return;
+  tr.scrollIntoView({block:'center', behavior:'smooth'});
+  tr.classList.remove('row-flash');
+  void tr.offsetWidth; // force reflow, aby se animace spustila znovu i pro stejný řádek
+  tr.style.setProperty('--row-flash-color', colorWithAlpha(effPointColor(ds, dsIdx), 0.45));
+  tr.classList.add('row-flash');
+  tr.addEventListener('animationend', ()=>tr.classList.remove('row-flash'), {once:true});
+}
+
+// Klik na datový bod přepne sadu a "probliknutím" upozorní na řádek v tabulce;
+// klik na vykreslenou regresní křivku jen přepne aktivní sadu dat na tu, které
+// křivka patří — užitečné hlavně když je zobrazeno víc sad najednou.
+function handleChartClick(evt, chart){
+  const target=findInteractiveChartTarget(evt, chart);
+  if(!target) return;
+  if(target.type==='point') jumpToDatasetPoint(target.dsIdx, target.kind, target.seriesIndex);
+  else if(target.dsIdx!==activeDatasetIdx) onDatasetTabClick(target.dsIdx);
+}
+
+// Kurzor "ukazovátko" nad klikatelným bodem/křivkou — jinak by nebylo poznat,
+// že jde vůbec kliknout.
+function handleChartHover(evt, chart){
+  const target=findInteractiveChartTarget(evt, chart);
+  if(chart.canvas) chart.canvas.style.cursor = target ? 'pointer' : '';
+}
+
 function addDataset(){
   if(datasets.length>=5) return;
   saveActiveDatasetSnapshot();
@@ -2806,7 +2922,12 @@ function renderCombinedChart(){
         type:'line',label:`fit${suffix}`,
         data:xSmooth.map((xi,k)=>({x:xi,y:ySmooth[k]})),
         borderColor:colorWithAlpha(ptColor,a),borderWidth:2.5,
-        pointRadius:0,fill:false,tension:0,order:2,
+        // Křivka je jen vizuální čára — pointHitRadius/pointHoverRadius:0 vypíná
+        // Chart.js výchozí "chytání" jednotlivých vzorkovaných bodů křivky myší
+        // (jinak by při najetí blízko čáry naskakovaly tooltips/zvýrazněné
+        // tečky na náhodných vzorcích). Klik/hover pro přepnutí sady řeší
+        // vlastní logika (findFitDatasetNearEvent) nezávisle na těchto bodech.
+        pointRadius:0,pointHitRadius:0,pointHoverRadius:0,fill:false,tension:0,order:2,
         _dsIdx:i,_kind:'fit',hidden:!!ds.hiddenSeries.fit
       });
 
@@ -2887,6 +3008,8 @@ function renderCombinedChart(){
     options:{
       responsive:true,maintainAspectRatio:false,
       animation:{duration:300},
+      onClick(evt, elements, chart){ handleChartClick(evt, chart); },
+      onHover(evt, elements, chart){ handleChartHover(evt, chart); },
       scales:{
         x:{type:'linear',...getScaleOpts('x'),
            grid:{color:c.grid},
