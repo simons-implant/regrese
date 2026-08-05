@@ -554,11 +554,20 @@ function findTableRowIndexForSeriesPoint(ds, kind, seriesIndex){
 // Klik na datový (i vyloučený) bod v grafu: přepne na příslušnou sadu (pokud
 // není už aktivní) a v tabulce na daný řádek upozorní krátkým probliknutím
 // barvou dané sady, ať je hned vidět, který konkrétní řádek to je.
+//
+// Pozor: ds.tableRows je jen SNAPSHOT, který se (re)ukládá až při přepnutí
+// záložky (saveActiveDatasetSnapshot) — dokud se nepřepne, je pro AKTIVNÍ
+// sadu klidně starý (např. hned po zaškrtnutí/odškrtnutí řádku myší, bez
+// přepnutí záložky). Graf se ale vždy staví z ŽIVÉ tabulky (getTableData).
+// Po volání onDatasetTabClick výše je tabulka v DOMu vždy ta pro dsIdx, takže
+// pro spolehlivé dohledání řádku čteme přímo živý DOM (captureTableRows),
+// ne ds.tableRows — jinak by nedávno vyloučený/zpět zahrnutý bod vedl na
+// špatný řádek (nebo na žádný).
 function jumpToDatasetPoint(dsIdx, kind, seriesIndex){
   if(dsIdx<0 || dsIdx>=datasets.length) return;
   if(dsIdx!==activeDatasetIdx) onDatasetTabClick(dsIdx);
   const ds=datasets[dsIdx];
-  const rowIdx=findTableRowIndexForSeriesPoint(ds, kind, seriesIndex);
+  const rowIdx=findTableRowIndexForSeriesPoint({tableRows:captureTableRows()}, kind, seriesIndex);
   if(rowIdx<0) return;
   const tb=document.getElementById('tbody');
   const tr=tb && tb.children[rowIdx];
