@@ -594,7 +594,7 @@ td input.cell[data-c="sy"]::placeholder{color:var(--text-muted);opacity:.6;}
 <body>
 <div class="app">
   <header class="topbar" id="topBar">
-    <div class="app-title" style="display:inline-flex;align-items:flex-end;gap:8px;"><svg viewBox="0 0 32 32" width="30" height="30" style="display:block;flex:none;"><defs><linearGradient id="fpLogoGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2f8fd1"/><stop offset="1" stop-color="#f2793a"/></linearGradient></defs><rect width="32" height="32" rx="7" fill="url(#fpLogoGrad)"/><polyline points="4,26 10,18 16,20 22,10 28,6" fill="none" stroke="white" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10" cy="18" r="2" fill="white"/><circle cx="16" cy="20" r="2" fill="white"/><circle cx="22" cy="10" r="2" fill="white"/><line x1="4" x2="28" y1="28" y2="28" stroke="white" stroke-width="1.5" opacity="0.4"/><line x1="4" x2="4" y1="4" y2="28" stroke="white" stroke-width="1.5" opacity="0.4"/></svg><span class="fp-name">FastPlot</span><span style="font-size:11px;font-weight:400;color:var(--text-muted);padding-bottom:2px;">v1.0.21</span></div>
+    <div class="app-title" style="display:inline-flex;align-items:flex-end;gap:8px;"><svg viewBox="0 0 32 32" width="30" height="30" style="display:block;flex:none;"><defs><linearGradient id="fpLogoGrad" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#2f8fd1"/><stop offset="1" stop-color="#f2793a"/></linearGradient></defs><rect width="32" height="32" rx="7" fill="url(#fpLogoGrad)"/><polyline points="4,26 10,18 16,20 22,10 28,6" fill="none" stroke="white" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="10" cy="18" r="2" fill="white"/><circle cx="16" cy="20" r="2" fill="white"/><circle cx="22" cy="10" r="2" fill="white"/><line x1="4" x2="28" y1="28" y2="28" stroke="white" stroke-width="1.5" opacity="0.4"/><line x1="4" x2="4" y1="4" y2="28" stroke="white" stroke-width="1.5" opacity="0.4"/></svg><span class="fp-name">FastPlot</span><span style="font-size:11px;font-weight:400;color:var(--text-muted);padding-bottom:2px;">v1.0.26</span></div>
     <div class="spacer"></div>
     <div style="width:1px;align-self:stretch;margin:-9px 16px -9px 0;background:var(--border);flex-shrink:0;"></div>
     <button onclick="openNavod()"
@@ -735,6 +735,14 @@ td input.cell[data-c="sy"]::placeholder{color:var(--text-muted);opacity:.6;}
             <span>Vlož data vlevo nebo je přetáhni sem.</span>
           </div>
           <div class="chart-drop-hint">Sem přetáhni soubor s daty nebo uložený projekt (.json)</div>
+          <button id="btn-save-all" onclick="saveGraphAllSVG()" title="Uložit graf všech sad dat (SVG)"
+            style="display:none;position:absolute;top:10px;right:10px;z-index:5;width:28px;height:28px;
+                   align-items:center;justify-content:center;background:var(--surface);border:1px solid var(--border);
+                   border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.12);cursor:pointer;color:var(--text);
+                   opacity:.75;transition:opacity .15s,background .15s;"
+            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.75'">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
         </div>
       </div>
       <div class="eq-bar" id="eqBar">
@@ -856,25 +864,9 @@ td input.cell[data-c="sy"]::placeholder{color:var(--text-muted);opacity:.6;}
           style="background:transparent;border:none;cursor:pointer;font-size:13px;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
           onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg><span class="btn-lbl">graf<br>reziduí</span></button>
 
-        <div class="export-wrap" style="position:relative;">
-          <button onclick="toggleExportDropdown('graph')" title="Uložit graf (SVG)"
-            style="background:transparent;border:none;cursor:pointer;font-size:13px;font-weight:700;font-family:'Sora',sans-serif;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
-            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">SVG<span class="btn-lbl">uložit<br>graf</span></button>
-          <div class="rtype-dropdown" id="export-dropdown-graph">
-            <button class="rtype-option" onclick="closeExportDropdowns();saveGraphSVG()">Rychlé uložení (SVG)</button>
-            <button class="rtype-option special" onclick="closeExportDropdowns();openAdvancedExportWizard('single')">Pokročilý průvodce…</button>
-          </div>
-        </div>
-
-        <div class="export-wrap" id="btn-save-all" style="display:none;position:relative;">
-          <button onclick="toggleExportDropdown('all')" title="Uložit graf všech sad dat najednou (SVG)"
-            style="background:transparent;border:none;cursor:pointer;font-size:13px;font-weight:700;font-family:'Sora',sans-serif;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
-            onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">SVG<span class="btn-lbl">uložit<br>vše</span></button>
-          <div class="rtype-dropdown" id="export-dropdown-all">
-            <button class="rtype-option" onclick="closeExportDropdowns();saveGraphAllSVG()">Rychlé uložení (SVG)</button>
-            <button class="rtype-option special" onclick="closeExportDropdowns();openAdvancedExportWizard('all')">Pokročilý průvodce…</button>
-          </div>
-        </div>
+        <button onclick="openAdvancedExportWizard()" title="Uložit graf (SVG) — Pokročilý průvodce"
+          style="background:transparent;border:none;cursor:pointer;font-size:13px;font-weight:700;font-family:'Sora',sans-serif;padding:2px 4px;line-height:1;opacity:.6;transition:opacity .15s;color:var(--text);display:inline-flex;flex-direction:column;align-items:center;"
+          onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='.6'">SVG<span class="btn-lbl">uložit<br>graf</span></button>
 
       </div>
 

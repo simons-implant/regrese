@@ -3743,6 +3743,20 @@ function getVisibleLegendItems(dsIdxList, includeTools){
   });
 }
 
+// Doplněk k getVisibleLegendItems pro Pokročilý průvodce: odfiltruje položky
+// legendy patřící k nástrojům (kombinace/integrál/derivace), které uživatel
+// v sekci "Zahrnout do exportu" zrovna odškrtl — položky datasetů nechává být.
+const ADV_LEGEND_TOOL_KIND={'combine':'combine', 'integral-area':'integral', 'derivative-line':'derivative', 'derivative-point':'derivative'};
+function advFilterLegendItemsByTools(items, st){
+  if(!chartInst || !st || !st.tools) return items;
+  return items.filter(it=>{
+    const dsCfg=chartInst.data.datasets[it.datasetIndex];
+    const toolKey=dsCfg && ADV_LEGEND_TOOL_KIND[dsCfg._kind];
+    if(!toolKey) return true;
+    return !!st.tools[toolKey];
+  });
+}
+
 function layoutLegendRows(items, availW){
   const itemW=it=>String(it.text).length*6.5+40;
   const rows=[]; let curRow=[], curW=0;
@@ -3802,7 +3816,11 @@ function svgIntegralArea(px, py, ml, mt, pw, ph){
          `<path d="${dTop}" fill="none" stroke="rgba(200,48,48,0.55)" stroke-width="1.5"/>`;
 }
 
-function svgDerivativeTangent(px, py){
+// showLine/showPoint — samostatně vypnutelné (tečna a bod dotyku jsou
+// v legendě dvě oddělené položky, viz Pokročilý průvodce), výchozí obojí.
+function svgDerivativeTangent(px, py, showLine, showPoint){
+  if(showLine===undefined) showLine=true;
+  if(showPoint===undefined) showPoint=true;
   if(!derivativeState.enabled) return '';
   const entry=getIntegrableFunctions().find(e=>e.key===derivativeState.fnKey);
   if(!entry) return '';
@@ -3810,9 +3828,12 @@ function svgDerivativeTangent(px, py){
   if(!series) return '';
   const p1=series.line.data[0], p2=series.line.data[1];
   if(!Number.isFinite(p1.y) || !Number.isFinite(p2.y)) return '';
-  let svg=`<path d="M${px(p1.x).toFixed(1)},${py(p1.y).toFixed(1)} L${px(p2.x).toFixed(1)},${py(p2.y).toFixed(1)}" fill="none" stroke="#1a8840" stroke-width="2" stroke-dasharray="3,3"/>`;
-  const pt=series.point.data[0];
-  svg+=svgShape('circle', px(pt.x), py(pt.y), 6, '#1a8840', '#fff', 2);
+  let svg='';
+  if(showLine) svg+=`<path d="M${px(p1.x).toFixed(1)},${py(p1.y).toFixed(1)} L${px(p2.x).toFixed(1)},${py(p2.y).toFixed(1)}" fill="none" stroke="#1a8840" stroke-width="2" stroke-dasharray="3,3"/>`;
+  if(showPoint){
+    const pt=series.point.data[0];
+    svg+=svgShape('circle', px(pt.x), py(pt.y), 6, '#1a8840', '#fff', 2);
+  }
   return svg;
 }
 
@@ -4011,31 +4032,75 @@ let advDragCtx=null;
 
 function defaultAdvDatasetCfg(i, ds){
   const col=DATASET_COLORS[i%DATASET_COLORS.length];
-  return {pointColor:col.point, pointStyle:ds.pointStyle, pointSize:6, lineColor:col.fit, lineWidth:2.5, dashed:false};
+  const hs=ds.hiddenSeries||{};
+  return {
+    pointColor:col.point, pointStyle:ds.pointStyle, pointSize:6, lineColor:col.fit, lineWidth:2.5, dashed:false,
+    // Pro každou komponentu sady dat: show = kreslit ji vůbec do grafu,
+    // legend = zobrazit jí odpovídající popisek v legendě (jen má-li smysl,
+    // když show=true). Výchozí "show" u data/vyloučeno/fit/IS 95 % zrcadlí
+    // to, co je zrovna vidět v živém grafu (klik na legendu v appce).
+    comp:{
+      data:{show:!hs.data, legend:true},
+      excl:{show:!hs.excl, legend:true},
+      fit:{show:!hs.fit, legend:true},
+      ci:{show:!hs.ci, legend:true},
+      sigmaY:{show:true, legend:true}
+    }
+  };
+}
+
+// Popisek legendy pro nejistoty bodů (σy) — podle režimu (abs/%) a podle
+// toho, jestli mají všechny zadané body stejnou hodnotu, nebo se liší.
+function sigmaYLegendLabel(ds){
+  if(!ds || !ds.sigmaYOn || !Array.isArray(ds.sy)) return null;
+  const vals=[];
+  (ds.x||[]).forEach((xi,k)=>{
+    const raw=ds.sy[k];
+    if(pointSigmaAbs(raw, ds.sigmaYMode, ds.y[k])!=null) vals.push(raw);
+  });
+  if(!vals.length) return null;
+  const allSame=vals.every(v=>v===vals[0]);
+  if(ds.sigmaYMode==='pct') return allSame ? `${Number(vals[0].toPrecision(6))} %` : 'různé %';
+  return allSame ? 'abs' : 'různé abs';
+}
+
+// Má daná sada dat vůbec IS 95 % pásmo k zobrazení (je zapnuté a spočtené
+// v živém grafu)? Používá se jak k výběru, jestli nabídnout přepínač
+// v panelu, tak jako podklad pro skutečné vykreslení v exportu.
+function advDsHasCi(i){
+  return !!(chartInst && chartInst.data.datasets.findIndex(d=>d._dsIdx===i && d._kind==='ci')>=0);
 }
 
 // Postaví čistě výchozí stav (bez ohledu na cokoliv uložené) — používá ho jak
 // první otevření průvodce (spolu s uloženými preferencemi, viz níže), tak
 // tlačítko "Obnovit výchozí".
-function buildDefaultAdvExportState(mode, activeDatasetsList){
+// candidateDatasetsList — VŠECHNY sady dat s daty (kandidáti do výběru nahoře
+// v průvodci), checkedIdxList — které z nich jsou zrovna zaškrtnuté (určuje
+// dsIdxList, tedy co se skutečně kreslí do náhledu/exportu). Konfigurace
+// (barvy, tvar bodu…) se staví pro VŠECHNY kandidáty, aby po odškrtnutí a
+// opětovném zaškrtnutí sady dat v rámci jednoho otevření průvodce zůstalo
+// její nastavení zachované.
+function buildDefaultAdvExportState(candidateDatasetsList, checkedIdxList){
   const dsCfg={};
-  activeDatasetsList.forEach(({ds,i})=>{ dsCfg[i]=defaultAdvDatasetCfg(i,ds); });
-  const firstDs=activeDatasetsList[0].ds;
+  candidateDatasetsList.forEach(({ds,i})=>{ dsCfg[i]=defaultAdvDatasetCfg(i,ds); });
   return {
-    mode,
-    dsIdxList: activeDatasetsList.map(({i})=>i),
+    allDsIdxList: candidateDatasetsList.map(({i})=>i),
+    dsIdxList: checkedIdxList.slice(),
     bgColor:'#ffffff',
     title:{show:false, text:'Regresní analýza', tex:false, fontSize:20, dx:0, dy:0},
     // align: 'center' (vystředěno podél osy, výchozí) nebo 'edge' (u konce osy) —
     // dx/dy z přetažení myší se k té zvolené základní pozici jen připočítávají.
-    xLabel:{text: mode==='all' ? firstDs.xLabel : axisLabels.x, tex:false, fontSize:12, align:'center', dx:0, dy:0},
-    yLabel:{text: mode==='all' ? firstDs.yLabel : axisLabels.y, tex:false, fontSize:12, align:'center', dx:0, dy:0},
+    xLabel:{text: axisLabels.x, tex:false, fontSize:12, align:'center', dx:0, dy:0},
+    yLabel:{text: axisLabels.y, tex:false, fontSize:12, align:'center', dx:0, dy:0},
     tickFontSize:11, legendFontSize:11,
     // min/max === null znamená "automaticky podle aktuálního zobrazení grafu";
     // jakmile je vyplněné číslo, použije se místo toho.
     xRange:{min:null, max:null}, yRange:{min:null, max:null},
     datasets:dsCfg,
-    legend:{} // klíč = datasetIndex položky legendy → {text, tex, hidden}
+    legend:{}, // klíč = datasetIndex položky legendy → {text, tex, hidden}
+    // Zaškrtnutí přesahů z panelu Nástroje v exportu — nabízí se jen ty, co
+    // jsou zrovna v appce zapnuté (viz advToolPickerHtml); výchozí je zahrnout.
+    tools:{combine:true, integral:true, derivative:true}
   };
 }
 
@@ -4145,25 +4210,24 @@ function applyAdvExportPrefs(state, prefs){
   if(prefs.legend) state.legend=JSON.parse(JSON.stringify(prefs.legend));
 }
 
-function openAdvancedExportWizard(mode){
-  if(mode==='single' && (!lastResult || !lastData || !chartInst)){ alert('Nejprve proveďte regresi.'); return; }
-  if(mode==='all'){
-    const nWithData=datasets.filter(ds=>ds.x.length>0||ds.excl.length>0).length;
-    if(nWithData<2){ alert('Pro export všech dat najednou potřebuješ alespoň 2 sady dat s daty.'); return; }
-  }
+function openAdvancedExportWizard(){
   if(!chartInst){ alert('Nejprve zobraz graf.'); return; }
+  const candidates=datasets.map((ds,i)=>({ds,i})).filter(({ds})=>ds.x.length>0||ds.excl.length>0);
+  if(!candidates.length){ alert('Nejprve vlož data a proveď regresi.'); return; }
 
-  const activeDatasetsList = mode==='all'
-    ? datasets.map((ds,i)=>({ds,i})).filter(({ds})=>ds.x.length>0||ds.excl.length>0)
-    : [{ds:datasets[activeDatasetIdx], i:activeDatasetIdx}];
+  // Výchozí zaškrtnutí: aktivní sada dat, pokud má data, jinak první dostupná —
+  // ostatní sady si uživatel zaškrtne sám nahoře v průvodci.
+  const activeDs=datasets[activeDatasetIdx];
+  const activeHasData=activeDs && (activeDs.x.length>0||activeDs.excl.length>0);
+  const defaultChecked=[activeHasData ? activeDatasetIdx : candidates[0].i];
 
-  advExportState=buildDefaultAdvExportState(mode, activeDatasetsList);
+  advExportState=buildDefaultAdvExportState(candidates, defaultChecked);
   // Poškozené/zastaralé uložené preference nesmí průvodce trvale rozbít —
   // při jakékoli chybě se zahodí a jede se z čistých výchozích hodnot.
   try{ applyAdvExportPrefs(advExportState, loadAdvExportPrefs()); }
   catch(e){
     clearAdvExportPrefs();
-    advExportState=buildDefaultAdvExportState(mode, activeDatasetsList);
+    advExportState=buildDefaultAdvExportState(candidates, defaultChecked);
   }
   advPreviewZoom=1;
   // Zahodit vyrovnávací paměť vytažených CSS stylů (fonty/KaTeX) při každém
@@ -4179,12 +4243,73 @@ function openAdvancedExportWizard(mode){
   initAdvExportDragHandlers();
 }
 
+// Zaškrtnutí/odškrtnutí sady dat v panelu — okamžitě přepočítá panel
+// (sekce "Sady dat"/legenda) i živý náhled, aniž by se ztratilo nastavení
+// (barvy, styl…) už zaškrtnutých/odškrtnutých sad.
+function advToggleDataset(i, checked){
+  if(!advExportState) return;
+  const st=advExportState;
+  const has=st.dsIdxList.includes(i);
+  if(checked && !has) st.dsIdxList.push(i);
+  else if(!checked && has) st.dsIdxList=st.dsIdxList.filter(x=>x!==i);
+  st.dsIdxList.sort((a,b)=>a-b);
+  renderAdvExportPanel();
+  renderAdvExportPreview();
+}
+
+// Zaškrtnutí/odškrtnutí přesahu z panelu Nástroje (kombinace/integrál/derivace).
+function advToggleTool(key, checked){
+  if(!advExportState) return;
+  advExportState.tools[key]=checked;
+  renderAdvExportPanel();
+  renderAdvExportPreview();
+}
+
+// Postaví HTML sekce "Zahrnout do exportu" — nahoře v pravém panelu,
+// chip s checkboxem pro každou sadu dat s daty a pro každý zrovna zapnutý
+// nástroj (kombinace/integrál/derivace, jinak by se u vypnutého nástroje
+// zaškrtávalo něco, co se stejně nemá co vykreslit).
+function advPickerSectionHtml(){
+  const st=advExportState;
+  const chip=(checked, col, label, onchange)=>`
+    <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-family:'Sora',sans-serif;
+              color:var(--text);cursor:pointer;user-select:none;background:${checked?'var(--btn)':'transparent'};
+              border:1px solid ${checked?col:'var(--border)'};border-radius:7px;padding:4px 10px 4px 8px;
+              transition:background .15s,border-color .15s;">
+      <input type="checkbox" ${checked?'checked':''} onchange="${onchange}"
+        style="width:13px;height:13px;margin:0;accent-color:${col};">
+      <span style="width:8px;height:8px;border-radius:50%;background:${col};flex-shrink:0;"></span>
+      ${label}
+    </label>`;
+
+  const dsChips=st.allDsIdxList.map(i=>{
+    const ds=datasets[i];
+    const col=effPointColor(ds, i);
+    return chip(st.dsIdxList.includes(i), col, escapeXml(ds.name||('Data '+(i+1))), `advToggleDataset(${i},this.checked)`);
+  }).join('');
+
+  const toolDefs=[
+    {key:'combine', enabled:combineState.enabled, label:'Kombinace funkcí', col:'#c83030'},
+    {key:'integral', enabled:integralState.enabled, label:'Integrál', col:'#c83030'},
+    {key:'derivative', enabled:derivativeState.enabled, label:'Derivace', col:'#1a8840'}
+  ];
+  const toolChips=toolDefs.filter(t=>t.enabled)
+    .map(t=>chip(!!st.tools[t.key], t.col, t.label, `advToggleTool('${t.key}',this.checked)`)).join('');
+
+  return `
+    <div class="adv-section">
+      <div class="adv-section-title">Zahrnout do exportu</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;">${dsChips}${toolChips}</div>
+    </div>`;
+}
+
 function resetAdvancedExportWizard(){
   if(!advExportState) return;
   if(!confirm('Opravdu obnovit veškeré nastavení pokročilého exportu (i to uložené v prohlížeči) na výchozí hodnoty?')) return;
   clearAdvExportPrefs();
-  const activeDatasetsList=advExportState.dsIdxList.map(i=>({ds:datasets[i], i}));
-  advExportState=buildDefaultAdvExportState(advExportState.mode, activeDatasetsList);
+  const candidates=advExportState.allDsIdxList.map(i=>({ds:datasets[i], i}));
+  const checked=advExportState.dsIdxList.slice();
+  advExportState=buildDefaultAdvExportState(candidates, checked);
   renderAdvExportPanel();
   renderAdvExportPreview();
 }
@@ -4240,6 +4365,20 @@ function advSetDsField(i,key,value){
   renderAdvExportPreview();
 }
 
+// Přepínač komponenty sady dat v sekci "Co zobrazit" — field je 'show'
+// (kreslit vůbec) nebo 'legend' (mít popisek v legendě; bere se v potaz jen
+// když show=true — proto se checkbox "v legendě" jen vizuálně zablokuje,
+// hodnotu si ale pamatuje i po vypnutí show). Panel se překreslí celý, ať
+// se disabled stav druhého checkboxu hned promítne.
+function advSetDsComp(i,key,field,value){
+  if(!advExportState) return;
+  const cfg=advExportState.datasets[i];
+  if(!cfg || !cfg.comp || !cfg.comp[key]) return;
+  cfg.comp[key][field]=value;
+  renderAdvExportPanel();
+  renderAdvExportPreview();
+}
+
 // Tlačítka "Zarovnat na střed" / "Zarovnat na okraj" u popisků os X/Y —
 // nastaví základní pozici a zruší jakékoliv předchozí ruční přetažení myší,
 // ať se popisek rovnou umístí na to správné místo.
@@ -4284,11 +4423,34 @@ function renderAdvExportPanel(){
   const dsRowsHtml=st.dsIdxList.map(i=>{
     const ds=datasets[i];
     const cfg=st.datasets[i];
+    if(!cfg.comp) cfg.comp=defaultAdvDatasetCfg(i,ds).comp; // pojistka pro starší uložené preference
     const ptOptions=POINT_STYLES.map(p=>`<option value="${p.key}" ${cfg.pointStyle===p.key?'selected':''}>${p.icon} ${escapeXml(p.label)}</option>`).join('');
+
+    // Co zobrazit — pro každou reálně dostupnou komponentu sady dat dvojice
+    // přepínačů: "Zobrazit" (kreslit vůbec do grafu) a "v legendě" (jen má
+    // smysl, když je Zobrazit zapnuté).
+    const compDefs=[
+      {key:'data', label:'Data', has: ds.x.length>0},
+      {key:'excl', label:'Vyloučené body', has: ds.excl.length>0},
+      {key:'fit', label:'Fit', has: !!ds.lastResult && ds.x.length>0},
+      {key:'ci', label:'IS 95 %', has: advDsHasCi(i)},
+      {key:'sigmaY', label:'Nejistoty bodů (σy)', has: !!sigmaYLegendLabel(ds)}
+    ].filter(d=>d.has);
+    const compRowsHtml=compDefs.map(d=>{
+      const c=cfg.comp[d.key];
+      return `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 0;">
+        <label class="adv-checkbox" style="margin:0;flex:1;"><input type="checkbox" ${c.show?'checked':''} onchange="advSetDsComp(${i},'${d.key}','show',this.checked)" style="margin-right:6px;"> ${escapeXml(d.label)}</label>
+        <label class="adv-checkbox" style="margin:0;flex-shrink:0;opacity:${c.show?'1':'.4'};"><input type="checkbox" ${c.legend?'checked':''} ${c.show?'':'disabled'} onchange="advSetDsComp(${i},'${d.key}','legend',this.checked)" style="margin-right:4px;"> v legendě</label>
+      </div>`;
+    }).join('');
+
     return `
     <div class="adv-ds-row">
       <div class="adv-ds-name">${escapeXml(ds.name||('Sada '+(i+1)))}</div>
-      <div class="adv-ds-grid">
+      <div class="adv-hint" style="margin-bottom:2px;">Co zobrazit</div>
+      ${compRowsHtml}
+      <div class="adv-ds-grid" style="margin-top:6px;">
         <label>Barva bodů<input type="color" value="${cfg.pointColor}" oninput="advSetDsField(${i},'pointColor',this.value)"></label>
         <label>Barva křivky<input type="color" value="${cfg.lineColor}" oninput="advSetDsField(${i},'lineColor',this.value)"></label>
         <label>Tvar bodu<select onchange="advSetDsField(${i},'pointStyle',this.value)">${ptOptions}</select></label>
@@ -4299,7 +4461,11 @@ function renderAdvExportPanel(){
     </div>`;
   }).join('');
 
-  const rawLegendItems=getVisibleLegendItems(st.dsIdxList, st.mode==='all');
+  // Sem patří už jen položky z panelu Nástroje (kombinace/integrál/derivace)
+  // — data/vyloučeno/fit/IS 95 %/nejistoty bodů se teď zapínají/vypínají
+  // přímo u příslušné sady dat výše (sekce "Co zobrazit"), prázdné pole
+  // proto, aby se sem žádná z nich znovu nedostala.
+  const rawLegendItems=advFilterLegendItemsByTools(getVisibleLegendItems([]), st);
   if(!st.legend) st.legend={};
   const legendRowsHtml=rawLegendItems.map(it=>{
     const key=String(it.datasetIndex);
@@ -4316,9 +4482,10 @@ function renderAdvExportPanel(){
         <label class="adv-checkbox"><input type="checkbox" ${cfg.tex?'checked':''} onchange="advToggleTex('legend:${key}',this.checked)" style="margin-right:6px;"> vysázet jako rovnici <span style="opacity:.6;font-size:10.5px;">(zápis jako u vlastní rovnice)</span></label>
       </div>
     </div>`;
-  }).join('') || '<div class="adv-hint">V grafu nejsou žádné viditelné položky legendy.</div>';
+  }).join('') || '<div class="adv-hint">Žádný nástroj (kombinace/integrál/derivace) není zapnutý.</div>';
 
   panel.innerHTML=`
+    ${advPickerSectionHtml()}
     <div class="adv-section">
       <div class="adv-section-title">Záhlaví</div>
       <label class="adv-checkbox"><input type="checkbox" ${st.title.show?'checked':''} onchange="advSetField('title','show',this.checked)" style="margin-right:6px;"> Zobrazit záhlaví</label>
@@ -4365,7 +4532,7 @@ function renderAdvExportPanel(){
       })()}
     </div>
     <div class="adv-section">
-      <div class="adv-section-title">Položky legendy</div>
+      <div class="adv-section-title">Legenda nástrojů</div>
       ${legendRowsHtml}
     </div>
     <div class="adv-section">
@@ -4639,13 +4806,67 @@ function advLegendRows(rows, W, legendFontSize){
   return svg;
 }
 
+// Komponenta (bod dat, fit, IS, vyloučené body, nebo přesah z nástroje) je
+// v exportu vidět, jen když NENÍ skrytá v živém grafu (klik na položku
+// legendy v appce) A ZÁROVEŇ ji uživatel v Pokročilém průvodci nezaškrtl
+// jako "skrýt" u odpovídající položky legendy — dřív se "skrýt" projevilo
+// jen v popisku legendy, samotná komponenta se přesto vykreslila.
+function advComponentVisible(st, chartJsIdx){
+  if(chartJsIdx<0) return true;
+  const cfg=st.legend && st.legend[String(chartJsIdx)];
+  if(cfg && cfg.hidden) return false;
+  return chartInst.isDatasetVisible(chartJsIdx);
+}
+
+// Ručně sestavené položky legendy pro komponenty sad dat (Data, Vyloučeno,
+// Fit, IS 95 %, Nejistoty bodů σy) — řízené přímo přepínači "Co zobrazit"
+// u dané sady v panelu, nezávisle na chart.js generateLabels (σy ani není
+// samostatný chart.js dataset). Klíčuje se řetězcem 'ds:<i>:<kind>' —
+// advResolveLegendItems si na tento klíč jen zapamatuje text/tex/hidden,
+// stejně jako u ostatních položek, styl markeru necháváme rovnou náš.
+function advDsComponentLegendItems(st){
+  const items=[];
+  const multi=st.dsIdxList.length>1;
+  st.dsIdxList.forEach(i=>{
+    const ds=datasets[i];
+    const cfg=st.datasets[i];
+    if(!ds || !cfg || !cfg.comp) return;
+    const suffix=multi ? ` (${ds.name})` : '';
+    const meta=getPointStyleMeta(cfg.pointStyle);
+    const sigmaLabel=sigmaYLegendLabel(ds);
+    const defs=[
+      {key:'data', has:ds.x.length>0, text:`Data${suffix}`,
+        fillStyle:cfg.pointColor, strokeStyle:'rgba(0,0,0,0.25)', lineWidth:1.5, pointStyle:meta.chart, rotation:meta.rotation},
+      {key:'excl', has:ds.excl.length>0, text:`Vyloučeno${suffix} (${ds.excl.length})`,
+        fillStyle:'transparent', strokeStyle:cfg.pointColor, lineWidth:2, pointStyle:meta.chart, rotation:meta.rotation},
+      {key:'fit', has:!!ds.lastResult && ds.x.length>0, text:`fit${suffix}`,
+        fillStyle:cfg.lineColor, strokeStyle:cfg.lineColor, lineWidth:cfg.lineWidth, pointStyle:'line', rotation:0},
+      {key:'ci', has:advDsHasCi(i), text:`IS 95 %${suffix}`,
+        fillStyle:colorWithAlpha(cfg.pointColor,0.35), strokeStyle:cfg.pointColor, lineWidth:1, pointStyle:'rect', rotation:0},
+      {key:'sigmaY', has:!!sigmaLabel, text:`${sigmaLabel}${suffix}`,
+        fillStyle:'transparent', strokeStyle:cfg.lineColor, lineWidth:1.5, pointStyle:'line', rotation:0}
+    ];
+    defs.forEach(d=>{
+      if(!d.has) return;
+      const c=cfg.comp[d.key];
+      if(!c || !c.show || !c.legend) return;
+      items.push({text:d.text, fillStyle:d.fillStyle, strokeStyle:d.strokeStyle, lineWidth:d.lineWidth,
+        pointStyle:d.pointStyle, rotation:d.rotation, datasetIndex:`ds:${i}:${d.key}`});
+    });
+  });
+  return items;
+}
+
 function buildAdvExportSvg(forExport){
   const st=advExportState;
   if(!st || !chartInst) return '';
   const activeDatasetsList=st.dsIdxList.map(i=>({ds:datasets[i], i}));
   const {min:xMin,max:xMax}=advResolveAxisRange('x');
   const {min:yMin,max:yMax}=advResolveAxisRange('y');
-  const rawLegendItems=getVisibleLegendItems(st.dsIdxList, st.mode==='all');
+  // Legenda = ručně řízené položky sad dat (viz "Co zobrazit" u sady) +
+  // položky z panelu Nástroje (ty pořád přes chart.js generateLabels).
+  const toolLegendItems=advFilterLegendItemsByTools(getVisibleLegendItems([]), st);
+  const rawLegendItems=[...advDsComponentLegendItems(st), ...toolLegendItems];
   const legendItems=advResolveLegendItems(rawLegendItems);
 
   const W=900, H=600, ml=70, mr=30, mb=70;
@@ -4682,21 +4903,24 @@ function buildAdvExportSvg(forExport){
   const ylCy=ylCyBase+st.yLabel.dy;
   inner+=`<g transform="rotate(-90,${ylCx.toFixed(1)},${ylCy.toFixed(1)})">${advTextEl(st.yLabel, ylCx, ylCy, 'middle', '#444456', '', 'ylabel')}</g>`;
 
-  // Přesahy z panelu Nástroje (kombinace/integrál/derivace) patří jen do
-  // exportu "uložit vše" — u samostatného grafu má zůstat jen jeho vlastní funkce.
-  if(st.mode==='all') inner+=svgIntegralArea(px,py,ml,mt,pw,ph);
+  // Přesahy z panelu Nástroje se kreslí, jen když je nástroj v appce zapnutý
+  // (funkce mají svou vlastní .enabled podmínku), zaškrtnutý v sekci
+  // "Zahrnout do exportu" A zároveň není v "Položkách legendy" skrytý.
+  const toolDsIdx=kind=>chartInst.data.datasets.findIndex(d=>d._kind===kind);
+  if(st.tools.integral && advComponentVisible(st, toolDsIdx('integral-area'))) inner+=svgIntegralArea(px,py,ml,mt,pw,ph);
 
   activeDatasetsList.forEach(({ds,i})=>{
     const cfg=st.datasets[i];
+    if(!cfg.comp) cfg.comp=defaultAdvDatasetCfg(i,ds).comp;
     const {x,y,excl,lastResult:result}=ds;
-    const findVis=kind=>{
-      const idx=chartInst.data.datasets.findIndex(d=>d._dsIdx===i && d._kind===kind);
-      return idx<0 ? true : chartInst.isDatasetVisible(idx);
-    };
-    const dataVisible=x.length>0 && findVis('data');
-    const exclVisible=excl.length>0 && findVis('excl');
-    const fitVisible=findVis('fit');
-    const ciItemVisible=findVis('ci');
+    // Viditelnost každé komponenty teď řídí výhradně přepínač "Zobrazit"
+    // v sekci "Co zobrazit" u dané sady dat (cfg.comp) — nezávisle na sobě,
+    // včetně nejistot bodů, které se dřív kreslily jen spolu s daty.
+    const dataVisible=x.length>0 && cfg.comp.data.show;
+    const exclVisible=excl.length>0 && cfg.comp.excl.show;
+    const fitVisible=!!result && x.length>0 && cfg.comp.fit.show;
+    const ciItemVisible=advDsHasCi(i) && cfg.comp.ci.show;
+    const sigmaVisible=cfg.comp.sigmaY.show && !!sigmaYLegendLabel(ds);
 
     let xSmooth=null, ySmooth=null, ci=null;
     if(result && x.length>0){
@@ -4704,8 +4928,7 @@ function buildAdvExportSvg(forExport){
       const step=(xsMax-xsMin)/399||1;
       xSmooth=Array.from({length:400},(_,k)=>xsMin+k*step);
       try{ ySmooth=xSmooth.map(result.smooth); }catch(e){ ySmooth=xSmooth.map(()=>NaN); }
-      const dsUseCI=(i===activeDatasetIdx)?showCI:ds.showCI;
-      ci=buildCiBand(result,x,y,xSmooth,ySmooth, dsUseCI && ciItemVisible);
+      ci=buildCiBand(result,x,y,xSmooth,ySmooth, ciItemVisible);
     }
 
     const baseCol=DATASET_COLORS[i%DATASET_COLORS.length];
@@ -4733,8 +4956,10 @@ function buildAdvExportSvg(forExport){
       }
     }
     if(dataVisible){
-      const sy=ds.sy||[], sigmaYMode=ds.sigmaYMode;
       x.forEach((xi,k)=>{ inner+=svgShape(cfg.pointStyle, px(xi), py(y[k]), cfg.pointSize, col.point, 'rgba(0,0,0,0.25)', 1.5); });
+    }
+    if(sigmaVisible){
+      const sy=ds.sy||[], sigmaYMode=ds.sigmaYMode;
       x.forEach((xi,k)=>{
         const sigma=pointSigmaAbs(sy[k], sigmaYMode, y[k]);
         if(sigma!=null) inner+=svgErrorBar(px, py, xi, y[k], sigma, col.fit, mt, ph);
@@ -4745,9 +4970,15 @@ function buildAdvExportSvg(forExport){
     }
   });
 
-  if(st.mode==='all'){
-    inner+=svgCombinedCurve(px,py);
-    inner+=svgDerivativeTangent(px,py);
+  // Kombinovaná křivka a tečna derivace — stejně jako integrál výše, jen
+  // když je nástroj zapnutý V APPCE, zaškrtnutý v exportu A viditelný podle
+  // legendy. Tečna a bod dotyku derivace jsou dvě oddělené položky legendy,
+  // proto se řeší zvlášť.
+  if(st.tools.combine && advComponentVisible(st, toolDsIdx('combine'))) inner+=svgCombinedCurve(px,py);
+  if(st.tools.derivative){
+    const showLine=advComponentVisible(st, toolDsIdx('derivative-line'));
+    const showPoint=advComponentVisible(st, toolDsIdx('derivative-point'));
+    if(showLine||showPoint) inner+=svgDerivativeTangent(px,py,showLine,showPoint);
   }
 
   // Samostatně stažené SVG (forExport) nemá přístup ke stylesheetu stránky,
@@ -4895,7 +5126,7 @@ function initAdvExportDragHandlers(){
 function saveAdvancedExportSvg(){
   if(!advExportState) return;
   const svg=buildAdvExportSvg(true);
-  downloadSvgFile(svg, advExportState.mode==='all' ? 'regrese_vsechna_data_pokrocile.svg' : 'regrese_pokrocile.svg');
+  downloadSvgFile(svg, advExportState.dsIdxList.length>1 ? 'regrese_vsechna_data_pokrocile.svg' : 'regrese_pokrocile.svg');
 }
 
 /* ══════════════════════════════════════════════
